@@ -54,25 +54,28 @@ export type { TelegramConfig }
 export const name = 'dsh-telegram'
 
 /**
- * `agents` and `credentials` are required — without them there is no agent to
- * drive and no token to drive it with. The interactive seams are optional so
- * the plugin still runs on a profile that does not load them.
+ * Hard requirements only. Cordis reads this as a flat list of service names —
+ * an object form would be read as services literally named after its keys — so
+ * the interactive seams are bound inside `apply` with `ctx.inject()` instead.
+ * That is what lets the plugin load on a profile that provides neither.
  */
-export const inject = {
-  required: ['agents', 'credentials'],
-  optional: ['userQuestions', 'approval', 'settings'],
-}
+export const inject = ['agents', 'credentials']
 
 /** The slice of the cordis context this plugin uses. */
 interface PluginContext {
   agents: AgentRegistryLike
   credentials: { resolve(ref: unknown): Promise<{ value?: string } | undefined> }
-  userQuestions?: UserQuestionService
-  approval?: unknown
   logger(name: string): Logger
   get(key: string): unknown
   on(name: string, listener: (...args: never[]) => unknown, prepend?: boolean): () => void
   effect(callback: () => (() => void) | Promise<() => void>, label?: string): () => void
+  /** Run `callback` once every named service is available; never, if one is not. */
+  inject(names: readonly string[], callback: (scope: PluginContext) => void): Disposable
+}
+
+/** What `ctx.inject` hands back: a fiber whose disposal unwinds the callback. */
+interface Disposable {
+  dispose(): unknown
 }
 
 /**
@@ -230,22 +233,24 @@ function installQuestions(
   provider: TelegramQuestionProvider,
   logger: Logger,
 ): () => void {
-  const service = ctx.userQuestions ?? (ctx.get('userQuestions') as UserQuestionService | undefined)
-  if (!service) {
-    logger.warn('[dsh-telegram] ctx.userQuestions is absent; questions cannot be answered here')
-    return () => undefined
-  }
+  const fiber = ctx.inject(['userQuestions'], (scope) => {
+    const service = scope.get('userQuestions') as UserQuestionService | undefined
+    if (!service) return
 
-  const seam = installQuestionProvider(
-    service,
-    (previous) => {
-      if (previous) provider.setFallback(previous)
-      return provider
-    },
-    logger,
-  )
+    scope.effect(() => {
+      const seam = installQuestionProvider(
+        service,
+        (previous) => {
+          if (previous) provider.setFallback(previous)
+          return provider
+        },
+        logger,
+      )
+      return () => seam.restore()
+    }, 'dsh-telegram: user-questions provider')
+  })
 
-  return () => seam.restore()
+  return () => void fiber.dispose()
 }
 
 /**
@@ -256,16 +261,18 @@ function installQuestions(
  * where the conversation is happening.
  */
 function installApprovals(ctx: PluginContext, answerer: TelegramApprovalAnswerer): () => void {
-  if (ctx.get('approval') === undefined) return () => undefined
+  const fiber = ctx.inject(['approval'], (scope) => {
+    scope.on(
+      'approval/request',
+      (async (request: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => {
+        const outcome = await answerer.decide(request)
+        return outcome ?? (await next())
+      }) as never,
+      true,
+    )
+  })
 
-  return ctx.on(
-    'approval/request',
-    (async (request: ApprovalRequest, next: () => Promise<ApprovalOutcome>) => {
-      const outcome = await answerer.decide(request)
-      return outcome ?? (await next())
-    }) as never,
-    true,
-  )
+  return () => void fiber.dispose()
 }
 
 /** Resolve the bot token through the harness credential seam. */
