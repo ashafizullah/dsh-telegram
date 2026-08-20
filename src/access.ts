@@ -13,7 +13,7 @@
  */
 
 import { timingSafeEqual } from 'node:crypto'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 /** The three answers to "may this user talk to the agent?". */
@@ -31,6 +31,15 @@ export interface AccessPolicyOptions {
   readonly allowFrom: readonly number[]
   /** The one-time code that transfers ownership; printed to the operator's console. */
   readonly claimCode: string
+  /**
+   * Where to also drop the claim code while the bot is unowned.
+   *
+   * The console is not always readable — a harness started detached, or a
+   * profile whose logger has no console sink, swallows it — and a claim code
+   * nobody can read makes the bot permanently unusable. The file is written
+   * owner-only and removed the moment the bot is claimed.
+   */
+  readonly claimCodeFile?: string
 }
 
 export class AccessPolicy {
@@ -50,6 +59,7 @@ export class AccessPolicy {
   static async open(file: string, options: AccessPolicyOptions): Promise<AccessPolicy> {
     const policy = new AccessPolicy(file, options)
     policy.ownerId = await readOwner(file)
+    await policy.publishClaimCode()
     return policy
   }
 
@@ -85,7 +95,39 @@ export class AccessPolicy {
 
     this.ownerId = userId
     await this.persist()
+    await this.retractClaimCode()
     return true
+  }
+
+  /**
+   * Drop the claim code where the operator can read it, while it is still
+   * needed. Owner-only permissions: anyone who can read it can take the bot.
+   */
+  private async publishClaimCode(): Promise<void> {
+    const path = this.options.claimCodeFile
+    if (path === undefined) return
+    if (this.ownerId !== undefined || this.options.allowFrom.length > 0) {
+      return await this.retractClaimCode()
+    }
+
+    try {
+      await mkdir(dirname(path), { recursive: true })
+      await writeFile(
+        path,
+        `Send this to your bot to take ownership of it:\n\n    /claim ${this.options.claimCode}\n\n` +
+          `It changes on every restart, and this file disappears once the bot is claimed.\n`,
+        { encoding: 'utf8', mode: 0o600 },
+      )
+    } catch {
+      // Best effort: the log still carries the code.
+    }
+  }
+
+  /** Remove the published code; it grants nothing now and should not linger. */
+  private async retractClaimCode(): Promise<void> {
+    const path = this.options.claimCodeFile
+    if (path === undefined) return
+    await rm(path, { force: true }).catch(() => undefined)
   }
 
   /** Record ownership atomically. */

@@ -136,11 +136,13 @@ async function start(
   const home = dataDirectory()
   const bindings = await BindingStore.open(join(home, 'bindings.json'))
   const claimCode = randomUUID().slice(0, 8)
+  const claimCodeFile = join(home, 'claim-code.txt')
   const access = await AccessPolicy.open(join(home, 'owner.json'), {
     allowFrom: config.allowFrom,
     claimCode,
+    claimCodeFile,
   })
-  announceAccess(access, config, claimCode, me.username, logger)
+  announceAccess(access, config, claimCode, claimCodeFile, me.username, logger)
 
   const surface = telegramSurface(api)
   const pending = new PendingRegistry<unknown>()
@@ -301,6 +303,7 @@ function announceAccess(
   access: AccessPolicy,
   config: TelegramConfig,
   claimCode: string,
+  claimCodeFile: string,
   username: string | undefined,
   logger: Logger,
 ): void {
@@ -318,6 +321,7 @@ function announceAccess(
   const handle = username ? `@${username}` : 'your bot'
   logger.warn(
     `[dsh-telegram] this bot has no owner yet. Message ${handle} with:\n\n    /claim ${claimCode}\n\n` +
-      `Until then it answers nobody. The code changes on every restart.`,
+      `Until then it answers nobody. The code changes on every restart, and is\n` +
+      `also readable at ${claimCodeFile} in case this log is not.`,
   )
 }

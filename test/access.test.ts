@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -85,5 +85,58 @@ describe('AccessPolicy — combined', () => {
     expect(policy.owner()).toBeUndefined()
     await policy.claim(7, 'secret')
     expect(policy.owner()).toBe(7)
+  })
+})
+
+
+describe('AccessPolicy — publishing the claim code', () => {
+  /** Where the code is dropped for an operator whose console ate the log. */
+  let codeFile: string
+
+  beforeEach(() => {
+    codeFile = `${file}.code.txt`
+  })
+
+  it('writes the code where the operator can read it', async () => {
+    await AccessPolicy.open(file, { allowFrom: [], claimCode: 'secret', claimCodeFile: codeFile })
+    expect(await readFile(codeFile, 'utf8')).toContain('/claim secret')
+  })
+
+  it('writes it owner-only, since reading it is taking the bot', async () => {
+    await AccessPolicy.open(file, { allowFrom: [], claimCode: 'secret', claimCodeFile: codeFile })
+    const mode = (await stat(codeFile)).mode & 0o777
+    expect(mode).toBe(0o600)
+  })
+
+  it('removes it the moment the bot is claimed', async () => {
+    const policy = await AccessPolicy.open(file, {
+      allowFrom: [],
+      claimCode: 'secret',
+      claimCodeFile: codeFile,
+    })
+    await policy.claim(7, 'secret')
+    await expect(readFile(codeFile, 'utf8')).rejects.toThrow()
+  })
+
+  it('leaves none behind for an already-claimed bot', async () => {
+    const first = await AccessPolicy.open(file, {
+      allowFrom: [],
+      claimCode: 'secret',
+      claimCodeFile: codeFile,
+    })
+    await first.claim(7, 'secret')
+
+    await AccessPolicy.open(file, { allowFrom: [], claimCode: 'new', claimCodeFile: codeFile })
+    await expect(readFile(codeFile, 'utf8')).rejects.toThrow()
+  })
+
+  it('writes none when an allowlist makes claiming impossible', async () => {
+    await AccessPolicy.open(file, { allowFrom: [7], claimCode: 'secret', claimCodeFile: codeFile })
+    await expect(readFile(codeFile, 'utf8')).rejects.toThrow()
+  })
+
+  it('still works when no file is configured', async () => {
+    const policy = await AccessPolicy.open(file, { allowFrom: [], claimCode: 'secret' })
+    expect(await policy.claim(7, 'secret')).toBe(true)
   })
 })
