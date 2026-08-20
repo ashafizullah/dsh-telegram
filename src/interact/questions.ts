@@ -86,7 +86,24 @@ export interface QuestionProviderOptions {
 }
 
 export class TelegramQuestionProvider implements UserQuestionProvider {
-  constructor(private readonly options: QuestionProviderOptions) {}
+  /**
+   * Where non-Telegram questions go. Settable after construction because the
+   * incumbent provider is only knowable at the moment this one displaces it.
+   */
+  private fallback: UserQuestionProvider | undefined
+
+  constructor(private readonly options: QuestionProviderOptions) {
+    this.fallback = options.fallback
+  }
+
+  /**
+   * Point delegation at the provider this one displaced.
+   *
+   * @param provider - the incumbent, which keeps answering its own sessions.
+   */
+  setFallback(provider: UserQuestionProvider | undefined): void {
+    this.fallback = provider
+  }
 
   /**
    * Ask the human, one question at a time.
@@ -102,7 +119,7 @@ export class TelegramQuestionProvider implements UserQuestionProvider {
     const target = sessionId === undefined ? undefined : this.options.targetOf(sessionId)
 
     if (!target) {
-      if (this.options.fallback) return this.options.fallback.ask(request)
+      if (this.fallback) return this.fallback.ask(request)
       throw new NoChatError(sessionId ?? '<unknown>')
     }
 

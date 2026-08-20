@@ -73,7 +73,8 @@ export interface UserQuestionProvider {
 
 /** `ctx.userQuestions` — the seam we register against, and take over. */
 export interface UserQuestionService {
-  provider?: UserQuestionProvider
+  /** Explicitly clearable: taking the slot over requires emptying it first. */
+  provider?: UserQuestionProvider | undefined
   registerProvider(provider: UserQuestionProvider): () => void
 }
 

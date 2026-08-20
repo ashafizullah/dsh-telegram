@@ -1,0 +1,18 @@
+# dsh-telegram — DSH bundle patch.
+#
+# One loader entry. `inject` names the harness services the plugin binds to:
+# `agents` and `credentials` are required, the rest are optional and the plugin
+# degrades rather than failing when a profile omits them.
+#
+# `userQuestions` and `approval` are what let a question or a permission prompt
+# be answered from the chat instead of only from the browser.
+
+- insert:
+    - id: telegram
+      name: 'dsh-telegram'
+      inject:
+        - agents
+        - credentials
+        - userQuestions
+        - approval
+        - settings
