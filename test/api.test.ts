@@ -178,6 +178,19 @@ describe('TelegramApi — resilience', () => {
     await expect(api.getMe()).rejects.toThrow(TelegramApiError)
   })
 
+  it('redacts the description too, not only the message', async () => {
+    // `description` is read straight into a log line on an auth failure, so a
+    // field that skips redaction only has to be wrong once.
+    const { api } = apiWith([
+      { status: 400, ok: false, error_code: 400, description: `Bad Request: bot${TOKEN} is unknown` },
+    ])
+    const error = (await api.getMe().catch((e: unknown) => e)) as TelegramApiError
+
+    expect(error.description).not.toContain(TOKEN)
+    expect(error.description).toContain('<redacted>')
+    expect(error.message).not.toContain(TOKEN)
+  })
+
   it('redacts the token when a network error quotes the request url', async () => {
     // undici puts the full url in its error message, which is the real leak path.
     const fetchImpl = (async (url: string) => {

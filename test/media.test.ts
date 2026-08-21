@@ -99,6 +99,8 @@ function build(
     bytes?: Uint8Array
     noStore?: boolean
     failDownload?: boolean
+    /** Fail with the raw request URL in the message, as a transport would. */
+    leakyFailure?: boolean
     /** Published limits, as the local attachment store exposes them. */
     imageLimits?: { maxImageDimension?: number; maxImagePixels?: number }
     /** File ids the seam refuses as too large, whatever their real size. */
@@ -117,6 +119,7 @@ function build(
         return { file_path: `photos/${fileId}.jpg`, file_size: 1000 }
       },
       async downloadFile() {
+        if (options.leakyFailure) throw new Error(`fetch failed: https://api.telegram.org/file/bot${SECRET}/x.jpg`)
         if (options.failDownload) throw new Error('connection reset')
         fetched.push(downloading as string)
         return options.bytes ?? new Uint8Array([1, 2, 3])
@@ -142,10 +145,14 @@ function build(
         }),
     maxBytes: 20_000,
     maxTextChars: 100,
+    redact: (text) => text.split(SECRET).join('<redacted>'),
   })
 
   return { collector, saved, fetched }
 }
+
+/** Stands in for a bot token, which lives in every request URL. */
+const SECRET = '8123456789:AAH0mVeryS3cretT0kenValue0123456789x'
 
 /** The sizes Telegram renders for a full-height portrait screenshot. */
 const SCREENSHOT = [
@@ -156,6 +163,38 @@ const SCREENSHOT = [
 ]
 
 const LIMITS = { maxImageDimension: 2000, maxImagePixels: 40_000_000 }
+
+describe('MediaCollector — what a refusal is allowed to say', () => {
+  it('never repeats a secret into the chat', async () => {
+    // A transport failure quotes the URL it was given, and the URL carries the
+    // token. This is the second lock — the API client redacts its own errors —
+    // but this sink is the one that persists.
+    const { collector } = build({ leakyFailure: true })
+    const { notice } = await collector.collect(message({ photo: SCREENSHOT }), 'look')
+
+    expect(notice).not.toContain(SECRET)
+    expect(notice).toContain('<redacted>')
+  })
+
+  it('never writes a secret into the session log either', async () => {
+    // The worse of the two: a prompt is carried forward for the whole
+    // conversation, so a leak here outlives the message that caused it.
+    const { collector } = build({ leakyFailure: true })
+    const { parts } = await collector.collect(message({ photo: SCREENSHOT }), 'look')
+
+    const written = JSON.stringify(parts)
+    expect(written).not.toContain(SECRET)
+    expect(written).toContain('look')
+  })
+
+  it('redacts a refusal that never touched the network', async () => {
+    const { collector } = build({ noStore: true })
+    const { notice, parts } = await collector.collect(message({ photo: SCREENSHOT }), SECRET)
+
+    expect(notice).not.toContain(SECRET)
+    expect(JSON.stringify(parts)).not.toContain(SECRET)
+  })
+})
 
 describe('MediaCollector — a photo bigger than the harness stores', () => {
   it('sends the largest size that fits, not the largest size', async () => {

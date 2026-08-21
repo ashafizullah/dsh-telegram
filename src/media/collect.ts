@@ -77,6 +77,15 @@ export interface MediaCollectorOptions {
   readonly maxBytes: number
   /** Truncate an inlined text file to this many characters. */
   readonly maxTextChars: number
+  /**
+   * Strip anything secret from a refusal before it is written down.
+   *
+   * A refusal quotes the failure that caused it, and lands in two durable
+   * places at once: the chat, and the session log the agent carries forward.
+   * The API client already redacts its own errors, so this is the second lock
+   * rather than the first — but this sink is the one that persists.
+   */
+  readonly redact?: (text: string) => string
   readonly logger?: Logger
 }
 
@@ -252,9 +261,13 @@ export class MediaCollector {
 
   /** Keep the caption, tell the agent what was left out, and tell the user why. */
   private declined(said: string | undefined, forAgent: string, forUser: string): CollectedMedia {
+    // Applied here rather than at each call site: every refusal in this class
+    // funnels through this method, so one guard covers all of them and a
+    // refusal added later cannot forget it.
+    const clean = this.options.redact ?? ((text: string) => text)
     return {
-      parts: [{ type: 'text', text: note(said, `The user sent ${forAgent}.`) }],
-      notice: forUser,
+      parts: [{ type: 'text', text: clean(note(said, `The user sent ${forAgent}.`)) }],
+      notice: clean(forUser),
     }
   }
 

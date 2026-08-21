@@ -441,7 +441,11 @@ export class TelegramApi {
         throw new TelegramApiError(
           this.redact(`telegram ${method} failed: ${envelope.description ?? `http ${response.status}`}`),
           envelope.error_code ?? response.status,
-          envelope.description,
+          // Redacted too, though Telegram's own descriptions do not quote the
+          // request. `description` is read straight into a log line on an auth
+          // failure, and a field that skips this is a field that only has to be
+          // wrong once.
+          envelope.description === undefined ? undefined : this.redact(envelope.description),
           envelope.parameters?.retry_after,
         )
       }

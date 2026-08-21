@@ -323,6 +323,7 @@ async function start(
         ...(attachmentStore(ctx) ? { attachments: attachmentStore(ctx) as never } : {}),
         maxBytes: config.media.maxBytes,
         maxTextChars: config.media.maxTextChars,
+        redact: secrets.redactor(),
         logger,
       })
     : undefined
