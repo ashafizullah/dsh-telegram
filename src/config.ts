@@ -66,8 +66,9 @@ export const Config = Schema.object({
     visionModel: Schema.string()
       .default('')
       .description(
-        'Model to run a turn on when it carries an image, as provider/model. ' +
-          'Empty uses the conversation\'s own model, which must then accept images.',
+        'Model that reads an image, as provider/model. The picture goes to a ' +
+          'session of its own there and only what it says joins the conversation. ' +
+          'Empty sends the image to the conversation itself, which must then accept it.',
       ),
   }),
 

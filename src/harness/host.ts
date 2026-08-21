@@ -161,8 +161,10 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
       return bare ? wrap(bare, sessionId) : undefined
     },
 
-    async create(sessionId, cwd) {
-      const route = options.selectModel?.()
+    async create(sessionId, cwd, forced) {
+      // A forced route comes from a caller that knows which model it needs —
+      // reading an image — and outranks the deployment's default.
+      const route = forced ?? options.selectModel?.()
       const prepared = prepareSelection()
       const handle = await options.agents.create({
         sessionId,

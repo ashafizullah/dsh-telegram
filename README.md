@@ -141,14 +141,25 @@ accepts images** — `deepseek-v4-flash` and `deepseek-v4-pro` are both text-onl
 work, and your caption still reaches the agent.
 
 **Settings → Telegram → Attachments** offers a dropdown of the models already
-configured in Settings → Models. Pick one and a conversation that carries an
-image runs there.
+configured in Settings → Models. Pick one and images become readable.
 
-It applies to the whole conversation, not just the turn with the picture in it,
-and that is not a preference — a provider checks the entire request history for
-images, so one image makes every later turn fail on a model that cannot see,
-however plain that turn's own text. The mark is durable, so a restart does not
-reroute the conversation back into failing. `/new` clears it.
+The picture never enters your conversation. It goes to a throwaway session on
+that model, which is asked to transcribe every piece of text in it and describe
+what it is; the reply comes back as ordinary text and *that* is what your
+conversation receives, under your own caption. The session is disposed either
+way — it exists for one turn.
+
+The indirection is the point. A provider checks the entire request history for
+images, so an image left in a conversation binds it to a model that can see for
+as long as it lives: one screenshot and every later turn — however plain its own
+text — has to run there too, away from the model you chose and the tools
+configured around it. Reading it elsewhere keeps the history free of images, so
+the conversation stays where it was, keeps its tools, and never gets stuck.
+
+If the reading fails — no model configured, the model unreachable, the turn
+timing out after two minutes — the picture goes through as it is and the
+conversation moves onto the vision model instead, durably, until `/new`. That
+is the fallback rather than the design, and the prompt says which happened.
 
 The catalog the browser can read carries no modality information, so the
 dropdown cannot mark which models accept images. The host checks that when an
@@ -202,7 +213,7 @@ Every field has a working default; an empty config runs.
 | `media.enabled` | `true` | Read images and text files the user sends |
 | `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
 | `media.maxTextChars` | `60000` | Truncate an inlined text file to this many characters |
-| `media.visionModel` | `""` | `provider/model` for turns carrying an image; empty uses the conversation's model. Picked from a dropdown on the settings page |
+| `media.visionModel` | `""` | `provider/model` that reads images in a session of its own; empty sends the image to the conversation itself. Picked from a dropdown on the settings page |
 
 ## Diagnostics
 

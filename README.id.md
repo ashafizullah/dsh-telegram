@@ -147,15 +147,28 @@ ditolak dengan kalimat yang menyebutkan apa yang akan berhasil, dan caption-mu
 tetap sampai ke agent.
 
 **Settings → Telegram → Attachments** menyediakan dropdown berisi model yang
-sudah kamu konfigurasi di Settings → Models. Pilih satu, dan percakapan yang
-membawa gambar akan berjalan di situ.
+sudah kamu konfigurasi di Settings → Models. Pilih satu, dan gambar jadi bisa
+dibaca.
 
-Itu berlaku untuk **seluruh percakapan**, bukan hanya turn yang berisi
-gambarnya, dan itu bukan pilihan selera. Provider memeriksa seluruh riwayat
-request untuk gambar, jadi satu gambar membuat setiap turn berikutnya gagal di
-model yang tidak bisa melihat — sepolos apa pun teks turn itu. Tandanya
-durable, jadi restart tidak mengembalikan percakapan ke keadaan gagal. `/new`
-membersihkannya.
+Gambarnya sendiri tidak pernah masuk ke percakapanmu. Gambar itu dikirim ke
+sesi sekali-pakai di model tersebut, yang diminta mentranskrip setiap teks di
+dalamnya dan menjelaskan singkat gambar apa itu; jawabannya kembali sebagai teks
+biasa, dan **itulah** yang diterima percakapanmu, di bawah caption-mu sendiri.
+Sesi itu dibuang setelahnya — umurnya satu turn.
+
+Perantaraan itulah intinya. Provider memeriksa seluruh riwayat request untuk
+gambar, jadi gambar yang tertinggal di sebuah percakapan mengikat percakapan itu
+ke model yang bisa melihat selamanya: satu screenshot, dan setiap turn
+berikutnya — sepolos apa pun teksnya — ikut berjalan di sana, jauh dari model
+yang kamu pilih dan tool yang dikonfigurasi di sekitarnya. Membacanya di tempat
+lain membuat riwayat tetap bersih dari gambar, sehingga percakapan tetap di
+tempatnya, tetap punya tool-nya, dan tidak pernah tersangkut.
+
+Kalau pembacaannya gagal — tidak ada model yang dikonfigurasi, model tidak bisa
+dihubungi, atau turn-nya habis waktu setelah dua menit — gambarnya dikirim apa
+adanya dan percakapan yang pindah ke model vision, secara durable, sampai
+`/new`. Itu cadangan, bukan rancangannya, dan prompt-nya menyebutkan mana yang
+terjadi.
 
 Katalog yang bisa dibaca browser tidak membawa informasi modalitas, jadi
 dropdown itu tidak bisa menandai model mana yang menerima gambar. Host yang
@@ -206,7 +219,7 @@ deployment yang dikonfigurasi lewat berkas.
 | `media.enabled` | `true` | Baca gambar dan berkas teks yang dikirim |
 | `media.maxBytes` | `20 MB` | Tolak yang lebih besar; Telegram membatasi unduhan bot di situ |
 | `media.maxTextChars` | `60000` | Potong berkas teks pada jumlah karakter ini |
-| `media.visionModel` | `""` | `provider/model` untuk percakapan yang membawa gambar; kosong memakai model percakapan itu sendiri |
+| `media.visionModel` | `""` | `provider/model` yang membaca gambar di sesi tersendiri; kosong mengirim gambarnya ke percakapan itu sendiri |
 
 ## Diagnostik
 

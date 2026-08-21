@@ -55,10 +55,23 @@ export interface RunningAgent {
 export interface AgentHost {
   /** The agent for a session if it is already loaded in this process. */
   live(sessionId: string): RunningAgent | undefined
-  /** Start a new session and agent under `sessionId`. */
-  create(sessionId: string, cwd: string): Promise<RunningAgent>
+  /**
+   * Start a new session and agent under `sessionId`.
+   *
+   * @param route - forces the model rather than taking the deployment's
+   *   default. Used by the throwaway session an image is read in, which has to
+   *   run somewhere that can see.
+   */
+  create(sessionId: string, cwd: string, route?: ModelRoute): Promise<RunningAgent>
   /** Load a persisted session; undefined when it can no longer be loaded. */
   resume(sessionId: string): Promise<RunningAgent | undefined>
+}
+
+/** Something that can replace an image in a prompt with what it says. */
+export interface PromptResolver {
+  /** Whether reading is possible at all right now. */
+  readonly available: boolean
+  resolve(content: readonly PromptPart[]): Promise<PromptPart[]>
 }
 
 /** Construction options. */
@@ -70,13 +83,21 @@ export interface SessionRunnerOptions {
   /** Session id factory; injected so tests can assert on stable ids. */
   readonly newSessionId?: () => string
   /**
-   * The model a turn carrying an image should run on.
+   * Reads an image with a vision model so the conversation receives text.
    *
-   * Read late so a change in Settings applies to the next such turn. Undefined
-   * leaves every turn on the session's own model — which is right when no
-   * vision model is configured, and the only option when none exists.
+   * This is what keeps a conversation on its own model: a provider inspects
+   * the whole request history, so an image that reaches the conversation binds
+   * it to a model that can see for as long as it lives.
    */
-  readonly visionModel?: () => ModelRoute | undefined
+  readonly extractor?: PromptResolver
+  /**
+   * The model a conversation must move to when an image did reach it.
+   *
+   * Only the fallback: reached when there is no extractor, or when reading the
+   * image failed and the picture itself had to go through. Read late so a
+   * change in Settings applies to the next such turn.
+   */
+  readonly visionRoute?: () => ModelRoute | undefined
   readonly logger?: Logger
 }
 
@@ -99,20 +120,45 @@ export class SessionRunner implements AgentRunner {
    */
   async prompt(target: ChatTarget, content: readonly PromptPart[]): Promise<void> {
     if (content.length === 0) return
+
+    // Resolved before the conversation's agent is touched at all, and outside
+    // the serialisation: reading an image takes a model call, and holding the
+    // conversation's queue for it would stall every later message behind it.
+    const resolved = await this.resolve(content)
+    if (resolved.length === 0) return
+
     await this.serialize(target, async () => {
       const agent = await this.agentFor(target)
 
-      // Set before every prompt: the harness reads the selection while
-      // assembling each step, so the override is established by the time the
-      // turn runs.
-      agent.useModel(this.routeFor(target, content))
+      // Only reached when an image survived resolution. Set before the prompt:
+      // the harness reads the selection while assembling each step, so the
+      // override must be in place by the time the turn runs.
+      agent.useModel(this.routeFor(target, resolved))
 
       // Recorded BEFORE the turn runs, because from this point the session's
       // log carries an image and every later turn must be routed for it.
-      if (carriesImage(content)) await this.options.bindings.markImages(target)
+      if (carriesImage(resolved)) await this.options.bindings.markImages(target)
 
-      agent.followup(content)
+      agent.followup(resolved)
     })
+  }
+
+  /**
+   * Turn images into text, where there is anything able to do it.
+   *
+   * A failure here is not the turn's failure: the picture simply goes through
+   * as it is, and the conversation moves to a model that can see it.
+   */
+  private async resolve(content: readonly PromptPart[]): Promise<PromptPart[]> {
+    const extractor = this.options.extractor
+    if (!extractor?.available || !carriesImage(content)) return [...content]
+
+    try {
+      return await extractor.resolve(content)
+    } catch (error) {
+      this.logger.warn('[dsh-telegram] could not read an image; sending it as it is', error)
+      return [...content]
+    }
   }
 
   /**
@@ -127,7 +173,7 @@ export class SessionRunner implements AgentRunner {
   private routeFor(target: ChatTarget, content: readonly PromptPart[]): ModelRoute | undefined {
     const carried = this.options.bindings.forChat(target)?.hasImages === true
     if (!carriesImage(content) && !carried) return undefined
-    return this.options.visionModel?.()
+    return this.options.visionRoute?.()
   }
 
   /**

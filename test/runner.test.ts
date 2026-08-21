@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { BindingStore } from '../src/session/bindings.js'
 import { SessionRunner } from '../src/session/runner.js'
-import type { AgentHost, RunningAgent } from '../src/session/runner.js'
+import type { AgentHost, PromptResolver, RunningAgent } from '../src/session/runner.js'
 
 const CHAT = { chatId: '1' }
 
@@ -78,7 +78,8 @@ beforeEach(async () => {
 function build(
   host: AgentHost,
   ids = ['s1', 's2', 's3'],
-  visionModel?: () => { provider: string; model: string } | undefined,
+  visionRoute?: () => { provider: string; model: string } | undefined,
+  extractor?: PromptResolver,
 ) {
   const queue = [...ids]
   return new SessionRunner({
@@ -86,7 +87,8 @@ function build(
     bindings,
     cwd: '/work',
     newSessionId: () => queue.shift() ?? 'exhausted',
-    ...(visionModel ? { visionModel } : {}),
+    ...(visionRoute ? { visionRoute } : {}),
+    ...(extractor ? { extractor } : {}),
   })
 }
 
@@ -288,7 +290,89 @@ describe('SessionRunner — empty prompts', () => {
 })
 
 
+/** A resolver standing in for a vision model that reads pictures. */
+function reader(options: { available?: boolean; fails?: boolean } = {}): PromptResolver {
+  return {
+    available: options.available !== false,
+    async resolve(content) {
+      if (options.fails) throw new Error('the vision model is unreachable')
+      return [
+        ...content.filter((part) => part.type === 'text'),
+        { type: 'text' as const, text: 'Contents of the image the user sent:\n\nRp 250.000' },
+      ]
+    },
+  }
+}
+
+describe('SessionRunner — an image read before the conversation sees it', () => {
+  it('sends the reading, not the picture', async () => {
+    const fake = fakeHost()
+    await build(fake.host, ['s1'], () => VISION, reader()).prompt(CHAT, withImage('how much?'))
+
+    expect(fake.agents.get('s1')?.prompts).toEqual([
+      'how much?Contents of the image the user sent:\n\nRp 250.000',
+    ])
+  })
+
+  it('leaves the conversation on its own model, which is the whole point', async () => {
+    // The history never holds an image, so the conversation keeps the model it
+    // was chosen for — and its tools with it.
+    const fake = fakeHost()
+    await build(fake.host, ['s1'], () => VISION, reader()).prompt(CHAT, withImage('how much?'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined])
+  })
+
+  it('does not mark the conversation, so later turns stay put too', async () => {
+    const fake = fakeHost()
+    const runner = build(fake.host, ['s1'], () => VISION, reader())
+
+    await runner.prompt(CHAT, withImage('how much?'))
+    await runner.prompt(CHAT, text('and the date?'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined, undefined])
+    expect(bindings.forChat(CHAT)?.hasImages).not.toBe(true)
+  })
+
+  it('leaves a text-only prompt alone rather than paying for a reading', async () => {
+    const resolve = vi.fn()
+    const fake = fakeHost()
+    await build(fake.host, ['s1'], () => VISION, {
+      available: true,
+      resolve,
+    }).prompt(CHAT, text('just words'))
+
+    expect(resolve).not.toHaveBeenCalled()
+  })
+
+  it('falls back to moving the conversation when no vision model is configured', async () => {
+    const fake = fakeHost()
+    await build(fake.host, ['s1'], () => VISION, reader({ available: false })).prompt(
+      CHAT,
+      withImage('look'),
+    )
+
+    expect(fake.agents.get('s1')?.prompts).toEqual(['look[image]'])
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION])
+  })
+
+  it('sends the picture through when the reading itself fails', async () => {
+    // A failed reading must not fail the turn: the user still asked something.
+    const fake = fakeHost()
+    await build(fake.host, ['s1'], () => VISION, reader({ fails: true })).prompt(
+      CHAT,
+      withImage('look'),
+    )
+
+    expect(fake.agents.get('s1')?.prompts).toEqual(['look[image]'])
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION])
+  })
+})
+
 describe('SessionRunner — the model an image turn runs on', () => {
+  // These are the fallback path: what happens to a picture that reached the
+  // conversation, because nothing could turn it into text first.
+
   it('moves a turn carrying an image onto the vision model', async () => {
     const fake = fakeHost()
     await build(fake.host, ['s1'], () => VISION).prompt(CHAT, withImage('why this error?'))

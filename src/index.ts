@@ -39,6 +39,7 @@ import { SessionRunner } from './session/runner.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
+import { VisionExtractor } from './media/extractor.js'
 import { MediaCollector } from './media/collect.js'
 import { VisionCheck } from './media/vision.js'
 import type { ModelCatalog } from './media/vision.js'
@@ -264,17 +265,33 @@ async function start(
     logger,
   })
 
-  const runner = new SessionRunner({
-    host: createAgentHost({
-      agents: ctx.agents,
-      message: buildUserMessage,
-      selectModel: () => selectModel(ctx, logger),
-      installSelection: installModelSelection,
-      logger,
-    }),
-    bindings,
-    cwd: config.cwd || process.cwd(),
+  const host = createAgentHost({
+    agents: ctx.agents,
+    message: buildUserMessage,
+    selectModel: () => selectModel(ctx, logger),
+    installSelection: installModelSelection,
+    logger,
+  })
+
+  const cwd = config.cwd || process.cwd()
+
+  // Shares the host with the runner so a reading runs on the same harness the
+  // conversation does — but never in the conversation's own session.
+  const extractor = new VisionExtractor({
+    host,
+    cwd,
     visionModel: () => parseRoute(config.media.visionModel),
+    logger,
+  })
+
+  const runner = new SessionRunner({
+    host,
+    bindings,
+    cwd,
+    extractor,
+    // The fallback for a picture that could not be read: the conversation
+    // itself moves, and stays moved.
+    visionRoute: () => parseRoute(config.media.visionModel),
     logger,
   })
 
@@ -318,7 +335,7 @@ async function start(
   })
 
   const teardown = [
-    subscribeToTurns(ctx, turns),
+    subscribeToTurns(ctx, turns, extractor),
     installQuestions(ctx, questions, logger),
     installApprovals(ctx, approvals),
   ]
@@ -328,6 +345,7 @@ async function start(
     () => {
       for (const dispose of teardown) dispose()
       pending.dispose()
+      extractor.dispose()
       textCapture.dispose()
       recovery.dispose()
       void turns.dispose()
@@ -423,10 +441,23 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
-/** Stream every Telegram-bound session's turns into its chat. */
-function subscribeToTurns(ctx: PluginContext, turns: TurnBridge): () => void {
+/**
+ * Stream every Telegram-bound session's turns into its chat.
+ *
+ * The same feed carries the throwaway sessions images are read in, and those
+ * are claimed by the extractor first: they belong to no chat, and letting the
+ * bridge see them would put a reading's own turn — and its failures — in front
+ * of whoever sent the picture.
+ */
+function subscribeToTurns(
+  ctx: PluginContext,
+  turns: TurnBridge,
+  extractor: VisionExtractor,
+): () => void {
   return ctx.on('session/event', ((session: { id: string }, event: SessionEvent) => {
-    void turns.handle(String(session.id), event)
+    const sessionId = String(session.id)
+    if (extractor.handle(sessionId, event)) return
+    void turns.handle(sessionId, event)
   }) as never)
 }
 
