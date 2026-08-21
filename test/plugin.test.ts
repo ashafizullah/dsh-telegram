@@ -81,6 +81,23 @@ function fakeContext() {
     },
   }
 
+  const watchers: ((next: unknown, prev: unknown) => void)[] = []
+  let registered: { namespace: string; value: unknown } | undefined
+
+  const settings = {
+    register(namespace: string, _schema: unknown, options?: { base?: unknown }) {
+      registered = { namespace, value: options?.base }
+      return {
+        get: () => registered?.value,
+        watch(callback: (next: unknown, prev: unknown) => void) {
+          watchers.push(callback)
+          return () => undefined
+        },
+        update: async () => undefined,
+      }
+    },
+  }
+
   const ctx: Record<string, unknown> = {
     agents,
     credentials: { resolve: async () => ({ value: '123456:TEST-TOKEN' }) },
@@ -112,6 +129,14 @@ function fakeContext() {
     listeners,
     provide: (key: string, value: unknown) => services.set(key, value),
     stop: () => disposeEffect?.(),
+    /** Install the settings seam, as a profile with a provider would. */
+    withSettings: () => services.set('settings', settings),
+    registration: () => registered,
+    /** Push a committed settings change, as the real seam would. */
+    commit: (next: unknown) => {
+      if (registered) registered = { ...registered, value: next }
+      for (const watcher of watchers) watcher(next, undefined)
+    },
   }
 }
 
@@ -275,6 +300,71 @@ describe('apply — interactive seams', () => {
 
     apply(harness.ctx as never, config())
     await vi.waitFor(() => expect(harness.prompts).toEqual(['still works']))
+    harness.stop()
+  })
+})
+
+
+describe('apply — settings namespace', () => {
+  it('registers its namespace so a configuration UI has something to bind', async () => {
+    const harness = fakeContext()
+    harness.withSettings()
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(bot.of('getMe').length).toBeGreaterThan(0))
+    harness.stop()
+
+    expect(harness.registration()?.namespace).toBe('telegram')
+  })
+
+  it('registers even while disabled, or nothing could ever re-enable it', async () => {
+    const harness = fakeContext()
+    harness.withSettings()
+
+    apply(harness.ctx as never, config({ enabled: false }))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    harness.stop()
+
+    expect(harness.registration()?.namespace).toBe('telegram')
+    expect(bot.calls).toHaveLength(0)
+  })
+
+  it('prefers the resolved settings value over the composed config', async () => {
+    const harness = fakeContext()
+    harness.withSettings()
+
+    // The composed config says enabled; the resolved settings value says not.
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(bot.of('getMe').length).toBe(1))
+
+    harness.commit({ ...config({ enabled: false }) })
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const after = bot.of('getMe').length
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(bot.of('getMe')).toHaveLength(after)
+    harness.stop()
+  })
+
+  it('reconnects when the configuration changes, without a restart', async () => {
+    const harness = fakeContext()
+    harness.withSettings()
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(bot.of('getMe').length).toBe(1))
+
+    harness.commit(config({ streaming: { throttleMs: 50 } }))
+    await vi.waitFor(() => expect(bot.of('getMe').length).toBe(2))
+
+    harness.stop()
+  })
+
+  it('runs on a profile with no settings provider at all', async () => {
+    const harness = fakeContext()
+    bot.queueUpdates([textUpdate(1, 'no settings here')])
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(harness.prompts).toEqual(['no settings here']))
     harness.stop()
   })
 })

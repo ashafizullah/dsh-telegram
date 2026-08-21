@@ -105,3 +105,22 @@ export const SILENT_LOGGER: Logger = {
   error: () => undefined,
   debug: () => undefined,
 }
+
+/** One registered settings namespace, from the owner's side. */
+export interface SettingsScope<T> {
+  /** The resolved value: schema defaults, then composition base, then user document. */
+  get(): T
+  /** Observe committed changes; returns a disposer. */
+  watch(callback: (next: T, previous: T) => void): () => void
+  /** Merge a patch into the user layer. */
+  update(patch: Partial<T>): Promise<void>
+}
+
+/** `ctx.settings` — the seam a configuration UI reads and writes through. */
+export interface SettingsService {
+  register<T>(
+    namespace: string,
+    schema: unknown,
+    options?: { base?: unknown; applies?: string },
+  ): SettingsScope<T>
+}

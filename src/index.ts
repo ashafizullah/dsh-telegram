@@ -42,6 +42,7 @@ import type {
   ApprovalOutcome,
   ApprovalRequest,
   Logger,
+  SettingsService,
   UserQuestionService,
 } from './harness/types.js'
 import type { SessionEvent } from './reply/turn-bridge.js'
@@ -52,6 +53,12 @@ export type { TelegramConfig }
 
 /** Cordis plugin name. */
 export const name = 'dsh-telegram'
+
+/**
+ * Settings namespace this plugin owns. The browser half binds the same string,
+ * which is the only thing pairing the two halves together.
+ */
+export const SETTINGS_NAMESPACE = 'telegram'
 
 /**
  * Hard requirements only. Cordis reads this as a flat list of service names —
@@ -85,16 +92,45 @@ interface Disposable {
  * @param config - resolved plugin configuration.
  */
 export function apply(ctx: PluginContext, config: TelegramConfig): void {
-  if (!config.enabled) return
-
   const logger = ctx.logger('dsh-telegram')
 
+  // Registering the namespace is what puts this plugin in front of a
+  // configuration UI at all, and it happens even when the plugin is disabled —
+  // otherwise the one screen that could re-enable it would have nothing to
+  // show. Absent on a profile with no settings provider, where the composition
+  // config is the only source.
+  const settings = ctx.get('settings') as SettingsService | undefined
+  const scope = settings?.register<TelegramConfig>(SETTINGS_NAMESPACE, Config, { base: config })
+
   ctx.effect(() => {
-    const abort = new AbortController()
-    void start(ctx, config, logger, abort.signal).catch((error: unknown) => {
-      logger.error('[dsh-telegram] failed to start', error)
+    let live = scope?.get() ?? config
+    let abort = new AbortController()
+
+    const run = () => {
+      const signal = abort.signal
+      void start(ctx, live, logger, signal).catch((error: unknown) => {
+        if (!signal.aborted) logger.error('[dsh-telegram] failed to start', error)
+      })
+    }
+
+    run()
+
+    // Every setting here shapes the connection — the token it opens, who may
+    // use it, how replies are streamed — so a change restarts it rather than
+    // leaving half the new configuration unapplied until the next boot. The
+    // cost is one aborted long poll.
+    const unwatch = scope?.watch((next) => {
+      live = next
+      abort.abort()
+      abort = new AbortController()
+      logger.info('[dsh-telegram] configuration changed; reconnecting')
+      run()
     })
-    return () => abort.abort()
+
+    return () => {
+      unwatch?.()
+      abort.abort()
+    }
   }, 'dsh-telegram: connection')
 }
 
@@ -110,6 +146,11 @@ async function start(
   logger: Logger,
   signal: AbortSignal,
 ): Promise<void> {
+  if (!config.enabled) {
+    logger.info('[dsh-telegram] disabled; not connecting')
+    return
+  }
+
   const token = await resolveToken(ctx, config.tokenRef)
   if (!token) {
     logger.warn(

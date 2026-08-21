@@ -1,0 +1,117 @@
+/**
+ * Strings for the settings page.
+ *
+ * The harness ships bilingual, so a page that only speaks English reads as
+ * half-finished next to the built-in sections. Both locales are kept in one
+ * file so a new string cannot be added to one and forgotten in the other.
+ */
+
+/** Every string the page renders, keyed by the locale the shell selects. */
+export const locales = {
+  'en-US': {
+    nav: 'Telegram',
+    heading: 'Telegram',
+    subheading: 'Talk to the agent from Telegram, with real formatting and answerable questions.',
+
+    loading: 'Reading configuration…',
+    unavailable:
+      'This browser cannot reach the settings document, so nothing here can be changed. Settings are loopback-only — open the harness on the machine running it.',
+    readonly: 'The settings document is read-only in this deployment.',
+
+    connectionTitle: 'Connection',
+    enabled: 'Connected',
+    enabledHint: 'Turn off to disconnect the bot without removing the plugin.',
+    tokenTitle: 'Bot token',
+    tokenConfigured: 'A token is stored.',
+    tokenMissing: 'No token yet. Create a bot with @BotFather and paste its token here.',
+    tokenFromEnvironment: 'Supplied by the environment, so it cannot be changed here.',
+    tokenPlaceholder: 'Paste a bot token',
+    tokenSave: 'Save token',
+    tokenClear: 'Remove token',
+    tokenSaved: 'Token saved. Reconnecting.',
+    tokenRef: 'Credential reference',
+    tokenRefHint: 'Where the token is stored. Change it only to keep several bots apart.',
+    baseUrl: 'Bot API address',
+    baseUrlHint: 'Change only when routing through a proxy.',
+
+    accessTitle: 'Access',
+    accessWarning:
+      'Anyone allowed here can make the agent run commands on this machine. Leave the list empty to hand the bot to one person with the claim code printed on the console.',
+    allowFrom: 'Allowed Telegram user ids',
+    allowFromHint: 'Comma separated. Empty enables the one-time claim flow. Send /whoami to find an id.',
+    allowFromInvalid: 'Enter numeric user ids separated by commas.',
+
+    repliesTitle: 'Replies',
+    streamingEnabled: 'Stream the answer as it is written',
+    streamingHint: 'Off sends each reply once, when it is finished.',
+    throttle: 'Minimum gap between edits (ms)',
+    throttleHint: 'Telegram rate-limits rapid edits to one chat. Below about a second invites that.',
+    placeholder: 'Shown while the agent is thinking',
+
+    advancedTitle: 'Advanced',
+    cwd: 'Working directory for new conversations',
+    cwdHint: 'Empty uses the directory the harness was started in.',
+    longPoll: 'Long-poll seconds',
+    timeout: 'Request timeout (ms)',
+
+    overridden: 'changed',
+    reset: 'Reset',
+    saveFailed: 'That change was not saved: {reason}',
+  },
+
+  'zh-CN': {
+    nav: 'Telegram',
+    heading: 'Telegram',
+    subheading: '在 Telegram 里与 Agent 对话，保留完整格式，并可直接回答提问。',
+
+    loading: '正在读取配置…',
+    unavailable: '此浏览器无法访问设置文档，因此这里无法修改。设置仅限本机访问，请在运行 harness 的机器上打开。',
+    readonly: '此部署的设置文档为只读。',
+
+    connectionTitle: '连接',
+    enabled: '已连接',
+    enabledHint: '关闭后断开机器人连接，但不卸载插件。',
+    tokenTitle: '机器人 Token',
+    tokenConfigured: '已保存 Token。',
+    tokenMissing: '尚未配置 Token。请用 @BotFather 创建机器人并把 Token 粘贴到这里。',
+    tokenFromEnvironment: '由环境变量提供，无法在此修改。',
+    tokenPlaceholder: '粘贴机器人 Token',
+    tokenSave: '保存 Token',
+    tokenClear: '删除 Token',
+    tokenSaved: 'Token 已保存，正在重新连接。',
+    tokenRef: '凭据引用名',
+    tokenRefHint: 'Token 的存放位置。仅在需要区分多个机器人时修改。',
+    baseUrl: 'Bot API 地址',
+    baseUrlHint: '仅在通过代理时才需要修改。',
+
+    accessTitle: '访问权限',
+    accessWarning:
+      '这里允许的人都能让 Agent 在本机执行命令。留空则通过控制台打印的认领码把机器人交给一个人。',
+    allowFrom: '允许的 Telegram 用户 ID',
+    allowFromHint: '用逗号分隔。留空启用一次性认领流程。发送 /whoami 可查看自己的 ID。',
+    allowFromInvalid: '请输入以逗号分隔的数字用户 ID。',
+
+    repliesTitle: '回复',
+    streamingEnabled: '边生成边显示回答',
+    streamingHint: '关闭后，每条回复在写完后一次性发送。',
+    throttle: '两次编辑的最小间隔（毫秒）',
+    throttleHint: 'Telegram 对同一会话的频繁编辑有限流。低于约一秒容易触发。',
+    placeholder: 'Agent 思考时显示的内容',
+
+    advancedTitle: '高级',
+    cwd: '新会话的工作目录',
+    cwdHint: '留空则使用启动 harness 的目录。',
+    longPoll: '长轮询秒数',
+    timeout: '请求超时（毫秒）',
+
+    overridden: '已修改',
+    reset: '恢复默认',
+    saveFailed: '未能保存该修改：{reason}',
+  },
+} as const
+
+/** Keys the page may ask for; a typo becomes a type error rather than a blank. */
+export type LocaleKey = keyof (typeof locales)['en-US']
+
+/** Translate one key, used where a real locale binding is not available. */
+export type Translate = (key: LocaleKey, params?: Record<string, unknown>) => string
