@@ -14,6 +14,7 @@
 
 import { escapeHtml } from './escape.js'
 import { renderInline } from './inline.js'
+import { htmlToPlain } from './plain.js'
 
 /** Bullet glyphs by nesting depth; deeper levels reuse the last one. */
 const BULLETS = ['•', '◦', '▪'] as const
@@ -27,8 +28,8 @@ const RULE = /^\s{0,3}([-*_])\s*(?:\1\s*){2,}$/
 const QUOTE = /^\s{0,3}>\s?(.*)$/
 const BULLET = /^(\s*)[-*+]\s+(.*)$/
 const ORDERED = /^(\s*)(\d{1,9})[.)]\s+(.*)$/
-const TABLE_ROW = /^\s*\|.*\|?\s*$/
-const TABLE_DIVIDER = /^\s*\|?(?:\s*:?-{2,}:?\s*\|)+\s*:?-{0,}:?\s*\|?\s*$/
+/** One delimiter cell: dashes, optionally anchored by alignment colons. */
+const TABLE_DIVIDER_CELL = /^:?-+:?$/
 
 /**
  * Render a markdown document as Telegram HTML.
@@ -108,12 +109,33 @@ function readFence(lines: readonly string[], start: number, fence: string, langu
   return { html, next: index }
 }
 
-/** Whether a table header row plus its divider start at `start`. */
+/**
+ * Whether a table starts at `start`.
+ *
+ * GFM's own rule, rather than a shape guess: a header row, then a delimiter
+ * row of the same width whose every cell is dashes with optional alignment
+ * colons. Both rows must contain a pipe, which is what keeps ordinary prose
+ * followed by a thematic break from reading as a table.
+ *
+ * Outer pipes are optional and a single dash is a valid delimiter — both are
+ * ordinary in model output, and requiring otherwise silently dropped tables
+ * back into flat text.
+ */
 function isTableStart(lines: readonly string[], start: number): boolean {
   const header = lines[start]
   const divider = lines[start + 1]
   if (header === undefined || divider === undefined) return false
-  return TABLE_ROW.test(header) && TABLE_DIVIDER.test(divider)
+  if (!isTableRow(header) || !isTableRow(divider)) return false
+
+  const cells = splitRow(divider)
+  if (cells.length !== splitRow(header).length) return false
+
+  return cells.every((cell) => TABLE_DIVIDER_CELL.test(cell))
+}
+
+/** A line participates in a table when it carries at least one cell divider. */
+function isTableRow(line: string): boolean {
+  return line.includes('|')
 }
 
 /**
@@ -125,8 +147,9 @@ function readTable(lines: readonly string[], start: number): Block {
   const rows: string[][] = []
   let index = start
 
-  while (index < lines.length && TABLE_ROW.test(lines[index] as string)) {
-    if (index !== start + 1) rows.push(splitRow(lines[index] as string))
+  while (index < lines.length && isTableRow(lines[index] as string)) {
+    // The delimiter row carries no content; it becomes the rule drawn below.
+    if (index !== start + 1) rows.push(splitRow(lines[index] as string).map(plainCell))
     index += 1
   }
 
@@ -137,16 +160,42 @@ function readTable(lines: readonly string[], start: number): Block {
     })
   }
 
-  const body = rows
-    .map((row) => row.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join(' | ').trimEnd())
-    .join('\n')
+  const render = (row: readonly string[]) =>
+    row.map((cell, column) => cell.padEnd(widths[column] ?? 0)).join(' | ').trimEnd()
 
-  return { html: `<pre>${escapeHtml(body)}</pre>`, next: index }
+  const [header, ...body] = rows
+  const lines_: string[] = []
+  if (header) {
+    lines_.push(render(header))
+    // Without a rule the header is just another row, and a table read in a
+    // chat bubble has no other cue that its first line names the columns.
+    lines_.push(widths.map((width) => '─'.repeat(width)).join('─┼─'))
+  }
+  for (const row of body) lines_.push(render(row))
+
+  return { html: `<pre>${escapeHtml(lines_.join('\n'))}</pre>`, next: index }
 }
 
-/** Split one pipe-table row into trimmed cells, dropping the edge pipes. */
+/** Split one row into trimmed cells, dropping the optional edge pipes. */
 function splitRow(line: string): string[] {
-  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+/**
+ * Cell text with its inline markdown resolved away.
+ *
+ * A preformatted block cannot carry nested formatting, so leaving the markers
+ * in place shows the reader `**lists**` where the model meant emphasis. Running
+ * the existing inline renderer and stripping the tags back off reuses one
+ * tested parser instead of a second, weaker one.
+ */
+function plainCell(cell: string): string {
+  return htmlToPlain(renderInline(cell))
 }
 
 /**
