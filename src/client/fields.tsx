@@ -31,16 +31,19 @@ const TEXT = {
  *
  * `brand` is a trap worth naming: despite the word, the shell resolves it to a
  * NEUTRAL — `#0f1115` in the light theme and `#f9fafb` in the dark one. It is
- * the high-contrast-against-the-page colour, not an accent. Anything painted
- * with it must take its foreground from `brandInvert`, which is the other end
- * of the same pair; hardcoding white there produced a switch whose knob
- * vanished into its own track in dark mode.
+ * the high-contrast-against-the-page colour, so it belongs on text and borders.
+ * A switch turned on with it is a white slab in one theme and a black one in
+ * the other, and reads as neither on nor a switch.
+ *
+ * `action` is the shell's actual blue, and the one a control that means "on"
+ * wants. It stays blue in both themes, which is what makes the state legible
+ * at a glance rather than by comparison.
  */
 const FILL = {
   /** High contrast against the page. Near-black in light, near-white in dark. */
   brand: 'var(--dsw-alias-brand-primary, #4d6bfe)',
-  /** The readable foreground for anything painted with {@link FILL.brand}. */
-  brandInvert: 'var(--dsw-alias-brand-primary-invert, #fff)',
+  /** The shell's own action blue, for a control that is switched on. */
+  action: 'var(--dsw-alias-button-info-fill, #4176e6)',
   surface: 'var(--dsw-alias-bg-layer-1, transparent)',
   /** A neutral track: a border token reads as a faint fill in both themes. */
   neutral: 'var(--dsw-alias-border-l2, rgba(128,128,128,0.45))',
@@ -242,10 +245,13 @@ export function Toggle(props: { checked: boolean; onChange: (next: boolean) => v
         height: 22,
         padding: 2,
         // Never transparent: a track whose colour happens to match the page
-        // would otherwise stop reading as a control at all.
-        border: `1px solid ${COLOR.border}`,
+        // would otherwise stop reading as a control at all. Off keeps a visible
+        // edge; on, the fill already carries the shape.
+        border: `1px solid ${props.checked ? 'transparent' : COLOR.border}`,
         borderRadius: 999,
-        background: props.checked ? FILL.brand : FILL.neutral,
+        // Blue rather than the brand neutral: "on" should be a colour, not a
+        // shade that inverts with the theme and reads as neither state.
+        background: props.checked ? FILL.action : FILL.neutral,
         cursor: props.disabled ? 'default' : 'pointer',
         opacity: props.disabled ? 0.5 : 1,
         transition: 'background 120ms ease',
@@ -257,10 +263,10 @@ export function Toggle(props: { checked: boolean; onChange: (next: boolean) => v
           width: 16,
           height: 16,
           borderRadius: '50%',
-          // Paired with the track rather than fixed: on the brand track the
-          // knob has to be its inverse, or the two are the same colour in
-          // whichever theme puts white on that side.
-          background: props.checked ? FILL.brandInvert : '#fff',
+          // White on both tracks now: the blue is dark enough in either theme
+          // for a white knob to carry the contrast, which is also the shape
+          // every other switch anyone has used has.
+          background: '#fff',
           border: '1px solid rgba(0, 0, 0, 0.12)',
           boxSizing: 'border-box',
           boxShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',
