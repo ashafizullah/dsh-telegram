@@ -41,6 +41,15 @@ export interface TelegramUser {
   readonly username?: string
 }
 
+/** One parsed span of message text. */
+export interface TelegramEntity {
+  readonly type: string
+  readonly offset: number
+  readonly length: number
+  /** Present on a `text_mention`, which is how a user without a @handle is named. */
+  readonly user?: TelegramUser
+}
+
 /** An incoming message. */
 export interface TelegramMessage {
   readonly message_id: number
@@ -50,7 +59,19 @@ export interface TelegramMessage {
   readonly text?: string
   readonly caption?: string
   readonly message_thread_id?: number
-  readonly reply_to_message?: { readonly message_id: number }
+  /**
+   * The message this one replies to, with enough of its sender to tell whether
+   * it was ours — which is how a group conversation continues without an
+   * @mention on every line.
+   */
+  readonly reply_to_message?: {
+    readonly message_id: number
+    readonly from?: TelegramUser
+  }
+  /** Text markup Telegram parsed, including the mentions this bot looks for. */
+  readonly entities?: readonly TelegramEntity[]
+  /** The same, for a photo or document caption. */
+  readonly caption_entities?: readonly TelegramEntity[]
   /**
    * Every size Telegram generated, smallest first. The dimensions matter: the
    * largest is routinely bigger than the harness will store.

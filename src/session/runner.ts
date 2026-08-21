@@ -93,6 +93,14 @@ export interface SessionRunnerOptions {
   /** Session id factory; injected so tests can assert on stable ids. */
   readonly newSessionId?: () => string
   /**
+   * Puts a session on the conversation's permission preset.
+   *
+   * Applied to a resumed session as well as a new one: the preset is a
+   * property of the surface the conversation arrives over, and a session that
+   * outlived a restart is still that conversation.
+   */
+  readonly permission?: { apply(sessionId: string): void }
+  /**
    * Reads an image with a vision model so the conversation receives text.
    *
    * This is what keeps a conversation on its own model: a provider inspects
@@ -264,7 +272,10 @@ export class SessionRunner implements AgentRunner {
         this.logger.warn(`[dsh-telegram] could not resume '${binding.sessionId}'`, error)
         return undefined
       })
-      if (resumed) return resumed
+      if (resumed) {
+        this.options.permission?.apply(resumed.sessionId)
+        return resumed
+      }
 
       this.logger.warn(
         `[dsh-telegram] session '${binding.sessionId}' is gone; starting a fresh conversation`,
@@ -274,6 +285,11 @@ export class SessionRunner implements AgentRunner {
 
     const sessionId = this.newSessionId()
     const agent = await this.options.host.create(sessionId, this.options.cwdFor(target))
+
+    // After creation, because the harness pins an initial permission before
+    // publishing the session; switching afterwards is the supported path.
+    this.options.permission?.apply(sessionId)
+
     await this.options.bindings.bind(target, sessionId)
     return agent
   }

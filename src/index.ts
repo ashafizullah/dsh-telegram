@@ -39,6 +39,7 @@ import { UpdateRouter } from './router.js'
 import { BindingStore } from './session/bindings.js'
 import { RecoveryOffer } from './session/recovery.js'
 import { SessionRunner } from './session/runner.js'
+import { PermissionControl } from './session/permission.js'
 import { WorkspaceStore, resolveDirectory } from './session/workspaces.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
@@ -321,10 +322,20 @@ async function start(
     logger,
   })
 
+  // The deployment's default is chosen for the surface the operator sits in
+  // front of. Telegram is not that surface, so it may choose its own.
+  const permission = new PermissionControl({
+    ...(ctx.get('permissionPresets') ? { presets: ctx.get('permissionPresets') as never } : {}),
+    ...(ctx.get('sessions') ? { sessions: ctx.get('sessions') as never } : {}),
+    preset: () => config.permissionPreset || undefined,
+    logger,
+  })
+
   const runner = new SessionRunner({
     host,
     bindings,
     cwdFor,
+    permission,
     extractor,
     // The fallback for a picture that could not be read: the conversation
     // itself moves, and stays moved.
@@ -374,6 +385,8 @@ async function start(
     textCapture,
     runner,
     ...(me.username ? { botUsername: me.username } : {}),
+    botId: me.id,
+    requireAddressing: config.requireMentionInGroups,
     ...(media ? { media } : {}),
     redact: secrets.redactor(),
     logger,

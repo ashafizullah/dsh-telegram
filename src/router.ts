@@ -18,6 +18,7 @@
  */
 
 import { COMMANDS, helpText, parseCommand } from './commands.js'
+import { addressesBot, isGroupChat, stripMention } from './telegram/addressing.js'
 import { escapeHtml } from './render/escape.js'
 import type { AccessPolicy } from './access.js'
 import type { ChatTarget } from './interact/surface.js'
@@ -94,6 +95,18 @@ export interface UpdateRouterOptions {
    * text-only, which is what it was before media was wired up.
    */
   readonly media?: MediaCollector
+  /**
+   * This bot's own user id, so a reply to something it said is recognised as
+   * addressing it. A group conversation continues that way rather than by
+   * @mentioning the bot on every line.
+   */
+  readonly botId?: number
+  /**
+   * Whether a group message must address the bot to be answered. Off makes the
+   * bot answer every allowlisted message in the room, which is the older
+   * behaviour and rarely what anyone wants.
+   */
+  readonly requireAddressing?: boolean
   /** This bot's username, so `/cmd@other_bot` is left alone in groups. */
   readonly botUsername?: string
   /**
@@ -151,10 +164,26 @@ export class UpdateRouter {
     const userId = message.from?.id
     if (userId === undefined) return
 
-    const text = message.text ?? message.caption
+    const raw = message.text ?? message.caption
     const decision = this.options.access.check(userId)
 
-    if (decision !== 'allowed') return await this.onUnauthorized(target, userId, text, decision)
+    if (decision !== 'allowed') return await this.onUnauthorized(target, userId, raw, decision)
+
+    // Asked after access and before anything else: a group is a room where
+    // people talk to each other, and a bot that answers every line is one
+    // nobody keeps around. Silence is the whole response — a message that was
+    // not for us deserves no reply, not even a refusal.
+    if (this.options.requireAddressing && !addressesBot(message, this.options.botUsername, this.options.botId)) {
+      return
+    }
+
+    // The @mention is addressing, not content. Left in, every prompt from a
+    // group would open with the bot's own name, which the model reads as part
+    // of the question.
+    const text =
+      raw !== undefined && isGroupChat(message)
+        ? stripMention(raw, this.options.botUsername) || undefined
+        : raw
 
     const carriesMedia = hasMedia(message)
 

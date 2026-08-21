@@ -25,6 +25,8 @@ async function build(
     at?: 'directory' | 'file' | 'missing' | 'denied'
     /** Set false to run without the workspace seam, as a bare deployment does. */
     workspace?: boolean
+    /** Set false to answer every group message, the older behaviour. */
+    requireAddressing?: boolean
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
@@ -82,6 +84,8 @@ async function build(
     textCapture,
     runner,
     botUsername: 'my_bot',
+    botId: 4242,
+    requireAddressing: options.requireAddressing !== false,
     ...(options.media ? { media: options.media as never } : {}),
     redact: (text) => text.split('SECRET-TOKEN').join('<redacted>'),
   })
@@ -218,6 +222,92 @@ describe('UpdateRouter — commands', () => {
     expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, [
       { type: 'text', text: '/deploy staging' },
     ])
+  })
+})
+
+/** A group message, optionally addressing the bot. */
+function groupMessage(text: string, options: { mention?: boolean; replyToBot?: boolean } = {}) {
+  const body = options.mention ? `@my_bot ${text}` : text
+  return {
+    update_id: 1,
+    message: {
+      message_id: 1,
+      chat: { id: -100200300, type: 'supergroup' },
+      from: { id: OWNER },
+      text: body,
+      ...(options.mention
+        ? { entities: [{ type: 'mention', offset: 0, length: '@my_bot'.length }] }
+        : {}),
+      ...(options.replyToBot ? { reply_to_message: { message_id: 9, from: { id: 4242 } } } : {}),
+    },
+  } as TelegramUpdate
+}
+
+describe('UpdateRouter — groups', () => {
+  it('stays out of a conversation it was not part of', async () => {
+    // A bot that answers every line in a room is one nobody keeps around.
+    const { router, runner, said } = await build()
+    await router.handle(groupMessage('did you see the deploy?'))
+
+    expect(runner.prompt).not.toHaveBeenCalled()
+    expect(said).toHaveLength(0)
+  })
+
+  it('answers when @mentioned', async () => {
+    const { router, runner } = await build()
+    await router.handle(groupMessage('what changed?', { mention: true }))
+    expect(runner.prompt).toHaveBeenCalled()
+  })
+
+  it('drops its own name from the prompt, since that is addressing', async () => {
+    const { router, runner } = await build()
+    await router.handle(groupMessage('what changed?', { mention: true }))
+
+    expect(runner.prompt).toHaveBeenCalledWith(
+      { chatId: '-100200300' },
+      [{ type: 'text', text: 'what changed?' }],
+    )
+  })
+
+  it('answers a reply to something it said', async () => {
+    const { router, runner } = await build()
+    await router.handle(groupMessage('yes, do it', { replyToBot: true }))
+    expect(runner.prompt).toHaveBeenCalled()
+  })
+
+  it('leaves private chats untouched', async () => {
+    const { router, runner } = await build()
+    await router.handle(message('no mention needed here'))
+    expect(runner.prompt).toHaveBeenCalled()
+  })
+
+  it('does not answer a command it was not addressed with', async () => {
+    // A room with several bots would otherwise see all of them react to /new.
+    const { router, runner } = await build()
+    await router.handle(groupMessage('/new'))
+    expect(runner.reset).not.toHaveBeenCalled()
+  })
+
+  it('answers a command addressed to it', async () => {
+    const { router, runner } = await build()
+    await router.handle(groupMessage('/new', { mention: true }))
+    expect(runner.reset).toHaveBeenCalled()
+  })
+
+  it('answers everything when the operator turns addressing off', async () => {
+    const { router, runner } = await build({ requireAddressing: false })
+    await router.handle(groupMessage('did you see the deploy?'))
+    expect(runner.prompt).toHaveBeenCalled()
+  })
+
+  it('still refuses a stranger in a group, addressed or not', async () => {
+    // Access is checked first and answers a different question.
+    const { router, runner } = await build()
+    const update = groupMessage('what changed?', { mention: true })
+    ;(update.message as { from: { id: number } }).from = { id: STRANGER }
+
+    await router.handle(update)
+    expect(runner.prompt).not.toHaveBeenCalled()
   })
 })
 

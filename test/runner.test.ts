@@ -304,6 +304,52 @@ function reader(options: { available?: boolean; fails?: boolean } = {}): PromptR
   }
 }
 
+describe('SessionRunner — the permission preset', () => {
+  /** A runner whose permission control just records what it was asked. */
+  function withPermission(host: AgentHost, ids = ['s1']) {
+    const applied: string[] = []
+    const queue = [...ids]
+    const runner = new SessionRunner({
+      host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => queue.shift() ?? 'exhausted',
+      permission: { apply: (sessionId) => void applied.push(sessionId) },
+    })
+    return { runner, applied }
+  }
+
+  it('applies it to a new session', async () => {
+    const fake = fakeHost()
+    const { runner, applied } = withPermission(fake.host)
+
+    await runner.prompt(CHAT, text('hello'))
+    expect(applied).toEqual(['s1'])
+  })
+
+  it('applies it to a resumed session too, since the surface has not changed', async () => {
+    // A conversation that outlived a restart is still a Telegram conversation.
+    const first = fakeHost()
+    await build(first.host, ['s1']).prompt(CHAT, text('hello'))
+
+    const second = fakeHost()
+    const { runner, applied } = withPermission(second.host, ['s9'])
+    await runner.prompt(CHAT, text('again'))
+
+    expect(applied).toEqual(['s1'])
+  })
+
+  it('applies it once per session, not once per message', async () => {
+    const fake = fakeHost()
+    const { runner, applied } = withPermission(fake.host)
+
+    await runner.prompt(CHAT, text('one'))
+    await runner.prompt(CHAT, text('two'))
+
+    expect(applied).toEqual(['s1'])
+  })
+})
+
 describe('SessionRunner — the status line', () => {
   it('escapes the working directory, which the operator chose', async () => {
     // /status puts the path inside <code>. An unbalanced tag makes Telegram

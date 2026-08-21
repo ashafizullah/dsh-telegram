@@ -84,6 +84,23 @@ export const Config = Schema.object({
         'is what supplies the tools, so this decides what the agent can do.',
     ),
 
+  requireMentionInGroups: Schema.boolean()
+    .default(true)
+    .description(
+      'In a group, answer only when the bot is @mentioned or replied to. Off ' +
+        'answers every message from an allowed user, which is rarely wanted in ' +
+        'a room where people also talk to each other. Private chats are never ' +
+        'affected.',
+    ),
+
+  permissionPreset: Schema.string()
+    .default('')
+    .description(
+      'Permission preset Telegram conversations run under — one of the names ' +
+        'the deployment defines. Empty follows the deployment default. A preset ' +
+        'whose approval policy asks is what makes the approval buttons appear.',
+    ),
+
   reconnect: Schema.object({
     baseDelayMs: Schema.natural().default(1000).description('First reconnect delay.'),
     maxDelayMs: Schema.natural().default(30_000).description('Longest reconnect delay.'),
