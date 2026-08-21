@@ -118,9 +118,53 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/claim <kode>` | Mengambil kepemilikan bot yang belum diklaim |
 | `/new` | Mulai percakapan baru, melupakan yang sekarang |
 | `/cd [path]` | Lihat atau ganti working directory |
+| `/model [apa]` | Lihat model, `/model list`, atau ganti ke salah satu |
+| `/sessions` | Lanjutkan percakapan lama dari chat ini |
 | `/status` | ID sesi, working directory, dan apakah sedang dimuat |
 | `/stop` | Batalkan apa pun yang sedang dikerjakan agent |
 | `/whoami` | User ID Telegram-mu |
+
+### Di dalam grup
+
+Bot yang menjawab semua obrolan itu bot yang cepat dikeluarkan dari grup. Jadi
+di grup dia cuma menjawab kalau di-@mention atau di-reply — konvensi yang sudah
+biasa dipakai orang. Mention-nya sendiri dibuang sebelum masuk prompt, karena
+itu cara memanggil, bukan isi pertanyaan. Dan me-reply pesan bot melanjutkan
+percakapan tanpa perlu @mention di tiap baris. Chat pribadi tidak terpengaruh.
+Setel `requireMentionInGroups` ke `false` kalau mau perilaku lama.
+
+Mention-nya dibandingkan dengan span hasil parsing Telegram sendiri, bukan
+dicari di dalam teks: `@mybot_staging` mengandung `@mybot`, dan pencocokan
+substring akan membuat bot ini menyahut mention milik bot lain.
+
+### Apa yang boleh dilakukan agent
+
+Deployment memilih satu default izin untuk semua yang dijalankannya, dan
+biasanya dipilih dengan UI web di kepala: loopback-only, ada orang yang
+mengawasi. Bot Telegram bukan itu — bisa dihubungi dari mana saja dan cuma
+dijaga daftar user id. Jadi `danger-full-access` yang sama terbaca sangat
+berbeda di sana. `permissionPreset` memilih salah satu preset milik deployment,
+khusus untuk percakapan Telegram.
+
+Ini juga yang menentukan tombol izin berfungsi atau tidak: di bawah preset yang
+kebijakannya `never`, tidak pernah ada yang meminta izin, jadi tombolnya tidak
+mungkin muncul. Memilih preset yang bertanya itulah yang menghidupkannya.
+
+### Model mana, dan percakapan mana
+
+`/model` memberitahu percakapan ini pakai model apa, `/model list` menampilkan
+yang terkonfigurasi, dan `/model provider/model` menggantinya. Nama model saja
+cukup kalau cuma satu provider yang punya; kalau lebih dari satu, dia bertanya
+yang mana. Beda dengan `/cd`, ini tidak me-restart apa pun — harness membaca
+seleksi yang bisa berubah setiap kali merakit langkah, jadi perubahannya
+mendarat di pesan berikutnya dengan riwayat tetap utuh. `/model default`
+mengembalikannya ke deployment.
+
+`/sessions` menawarkan percakapan-percakapan lama di chat ini sebagai tombol.
+Selama ini `/new` itu pintu satu arah: harness menyimpan semua log-nya, tapi
+binding yang menyebut percakapan sekarang ditimpa, dan dari HP tidak ada jalan
+kembali. Daftarnya milik plugin ini sendiri, jadi isinya percakapan dari chat
+ini — bukan semua sesi yang pernah dibuka di UI web.
 
 ### Tool apa saja yang dipunya agent
 
@@ -270,6 +314,8 @@ masalah.
 | `allowFrom` | `[]` | User ID yang diizinkan; kosong mengaktifkan alur klaim |
 | `cwd` | cwd harness | Direktori awal percakapan, sampai dipindah dengan `/cd` |
 | `agentPreset` | `""` | Preset yang dipakai percakapan Telegram; kosong ikut bawaan deployment. Preset inilah yang menyediakan tool-nya |
+| `permissionPreset` | `""` | Preset izin untuk Telegram, dari tabel milik deployment; kosong ikut bawaan deployment |
+| `requireMentionInGroups` | `true` | Di grup, jawab hanya kalau di-@mention atau di-reply |
 | `streaming.enabled` | `true` | Tampilkan jawaban sambil ditulis |
 | `streaming.throttleMs` | `1200` | Jeda minimum antar frame stream |
 | `streaming.placeholder` | `…` | Isi yang ditampilkan di bawah baris tool sebelum teks pertama tiba |
@@ -412,8 +458,6 @@ kedua ikut terbundel, semua hook rusak begitu halamannya ter-mount.
 
 ## Yang belum bisa
 
-- **Grup belum ada filternya.** Di grup, bot menjawab semua pesan dari orang
-  yang ada di daftar izin — tanpa perlu di-mention atau di-reply.
 - **Reasoning effort belum ikut terbawa.** Cuma provider dan model yang sampai
   ke sesi Telegram; effort yang kamu pilih di Settings → Models tidak.
 - **Satu direktori per percakapan.** `/cd` memindahkan percakapan, tapi sesi

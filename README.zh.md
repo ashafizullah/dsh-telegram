@@ -107,9 +107,45 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | `/claim <码>` | 认领一个尚未被认领的机器人 |
 | `/new` | 开始新对话，忘掉当前这一段 |
 | `/cd [路径]` | 查看或切换工作目录 |
+| `/model [名称]` | 查看模型、`/model list`，或切换到某一个 |
+| `/sessions` | 继续这个聊天里较早的一段对话 |
 | `/status` | 会话 ID、工作目录，以及是否已加载 |
 | `/stop` | 取消 Agent 当前正在做的事 |
 | `/whoami` | 你的 Telegram 用户 ID |
+
+### 在群里
+
+一个每句话都要接的机器人，没人愿意留在群里。所以在群里它只在被 @提及或被回复时
+才作答——这也正是大家已经在用的惯例。它自己的 @提及会在进入提示词前被去掉，因为
+那是称呼而不是内容；而回复它说过的话可以继续这段交流，无需每行都 @一次。私聊不
+受影响。想要旧行为，把 `requireMentionInGroups` 设为 `false`。
+
+@提及是跟 Telegram 自己解析出的区间比对的，而不是在文本里搜索：
+`@mybot_staging` 里含有 `@mybot`，用子串匹配会让这个机器人抢答另一个机器人的
+@提及。
+
+### Agent 被允许做什么
+
+部署会为它运行的一切选定一个权限默认值，而这个选择通常是对着网页界面做的：
+仅回环访问，有人在旁边看着。Telegram 机器人不是这样——它从任何地方都能被联系到，
+只靠一份用户 ID 名单把关。所以同样的 `danger-full-access`，在那里意味着完全不同
+的东西。`permissionPreset` 从部署自己的表里挑一个，只作用于 Telegram 对话。
+
+它同时决定审批按钮能否工作：在审批策略为 `never` 的 preset 下，永远不会有人来
+请求许可，按钮也就永远不会出现。选一个会询问的 preset，才是把它们打开。
+
+### 用哪个模型，以及哪一段对话
+
+`/model` 告诉你当前对话用的是哪个模型，`/model list` 列出已配置的，
+`/model provider/model` 则切换。当只有一个供应方提供某个模型 id 时，直接写它就
+够了；有多个时，它会反问是哪一个。与 `/cd` 不同，这不会重启任何东西——harness 在
+组装每一步时都会读取一份可变的选择，所以改动会落在下一条消息上，历史完好无损。
+`/model default` 把对话交还给部署默认值。
+
+`/sessions` 把这个聊天里较早的对话做成按钮供你挑选。在此之前 `/new` 是一扇单向
+门：harness 保留了每一份日志，但指向当前对话的绑定被替换掉了，从手机上再没有别的
+路回去。这份列表属于本插件自己，因此装的是这个聊天里的对话——而不是网页界面开过
+的每一个会话。
 
 ### Agent 有哪些工具
 
@@ -224,6 +260,8 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 | `allowFrom` | `[]` | 允许的用户 ID；留空则启用认领流程 |
 | `cwd` | harness 的 cwd | 对话的起始目录，直到用 `/cd` 切换 |
 | `agentPreset` | `""` | Telegram 对话所用的 preset；留空则取部署默认值。工具正是由 preset 提供 |
+| `permissionPreset` | `""` | Telegram 使用的权限 preset，取自部署自己的表；留空则跟随部署默认值 |
+| `requireMentionInGroups` | `true` | 在群里，只有被 @提及或被回复时才作答 |
 | `streaming.enabled` | `true` | 边生成边显示回答 |
 | `streaming.throttleMs` | `1200` | 两帧之间的最小间隔 |
 | `streaming.placeholder` | `…` | 在有正文之前，工具行下方显示的内容 |
@@ -345,8 +383,6 @@ React 与 shell 自身的包被标记为 external；打包第二份 React 会在
 
 ## 已知限制
 
-- **群组没有触发限制。** 在群里，机器人会回应允许名单内用户的每一条消息——无需
-  @提及，也无需回复。
 - **推理强度未被传递。** 只有 provider 和 model 会到达 Telegram 会话；在
   设置 → Models 中选择的推理强度不会。
 - **每个对话一个目录。** `/cd` 可以移动对话，但会话本身无法移动——切换目录会

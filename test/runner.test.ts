@@ -304,6 +304,73 @@ function reader(options: { available?: boolean; fails?: boolean } = {}): PromptR
   }
 }
 
+describe('SessionRunner — the model a conversation chose', () => {
+  const CHOSEN = { provider: 'xiaomi', model: 'mimo-v2.5' }
+
+  /** A runner whose conversation has picked its own model. */
+  function withChoice(host: AgentHost, chosen?: { provider: string; model: string }) {
+    return new SessionRunner({
+      host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      visionRoute: () => VISION,
+      ...(chosen ? { chosenRoute: () => chosen } : {}),
+    })
+  }
+
+  it('routes an ordinary turn onto the chosen model', async () => {
+    const fake = fakeHost()
+    await withChoice(fake.host, CHOSEN).prompt(CHAT, text('hello'))
+    expect(fake.agents.get('s1')?.routes).toEqual([CHOSEN])
+  })
+
+  it('leaves a conversation that chose nothing on the deployment default', async () => {
+    const fake = fakeHost()
+    await withChoice(fake.host).prompt(CHAT, text('hello'))
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined])
+  })
+
+  it('lets an image outrank the choice, since a blind model fails the request', async () => {
+    // Not a preference to honour: a model with no image input rejects the
+    // whole request rather than degrading.
+    const fake = fakeHost()
+    await withChoice(fake.host, CHOSEN).prompt(CHAT, withImage('what is this?'))
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION])
+  })
+
+  it('falls back to the choice when no vision model is configured', async () => {
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      chosenRoute: () => CHOSEN,
+    })
+
+    await runner.prompt(CHAT, withImage('what is this?'))
+    expect(fake.agents.get('s1')?.routes).toEqual([CHOSEN])
+  })
+
+  it('reads the choice per prompt, so /model lands on the next message', async () => {
+    const fake = fakeHost()
+    const queue = [undefined, CHOSEN]
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      chosenRoute: () => queue.shift(),
+    })
+
+    await runner.prompt(CHAT, text('one'))
+    await runner.prompt(CHAT, text('two'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined, CHOSEN])
+  })
+})
+
 describe('SessionRunner — the permission preset', () => {
   /** A runner whose permission control just records what it was asked. */
   function withPermission(host: AgentHost, ids = ['s1']) {

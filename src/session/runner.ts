@@ -29,6 +29,12 @@ import { escapeHtml } from '../render/escape.js'
 
 import type { BindingStore } from './bindings.js'
 
+/** The first words of a prompt, for labelling the conversation in a list. */
+function firstText(content: readonly PromptPart[]): string | undefined {
+  const said = content.find((part) => part.type === 'text')
+  return said?.type === 'text' && said.text.trim() !== '' ? said.text : undefined
+}
+
 /** Whether a prompt carries an image, which changes a conversation for good. */
 function carriesImage(content: readonly PromptPart[]): boolean {
   return content.some((part) => part.type === 'image')
@@ -101,6 +107,16 @@ export interface SessionRunnerOptions {
    */
   readonly permission?: { apply(sessionId: string): void }
   /**
+   * Remembers which conversations this chat has had, so `/sessions` can offer
+   * one back. Absent makes `/new` the one-way door it used to be.
+   */
+  readonly history?: {
+    remember(
+      target: ChatTarget,
+      session: { sessionId: string; startedAt: number; cwd: string; label?: string },
+    ): Promise<void>
+  }
+  /**
    * Reads an image with a vision model so the conversation receives text.
    *
    * This is what keeps a conversation on its own model: a provider inspects
@@ -116,6 +132,14 @@ export interface SessionRunnerOptions {
    * change in Settings applies to the next such turn.
    */
   readonly visionRoute?: () => ModelRoute | undefined
+  /**
+   * The model this conversation chose, if it chose one.
+   *
+   * Read per prompt rather than at session creation, because the harness reads
+   * a mutable selection while assembling each step — which is what lets
+   * `/model` take effect on the very next message rather than the next `/new`.
+   */
+  readonly chosenRoute?: (target: ChatTarget) => ModelRoute | undefined
   readonly logger?: Logger
 }
 
@@ -157,6 +181,17 @@ export class SessionRunner implements AgentRunner {
       // log carries an image and every later turn must be routed for it.
       if (carriesImage(resolved)) await this.options.bindings.markImages(target)
 
+      // Recorded with the prompt rather than at creation, because the opening
+      // words are what make the conversation recognisable in a list.
+      await this.options.history
+        ?.remember(target, {
+          sessionId: agent.sessionId,
+          startedAt: Date.now(),
+          cwd: this.options.cwdFor(target),
+          ...(firstText(resolved) === undefined ? {} : { label: firstText(resolved) as string }),
+        })
+        .catch(() => undefined)
+
       agent.followup(resolved)
     })
   }
@@ -190,8 +225,35 @@ export class SessionRunner implements AgentRunner {
    */
   private routeFor(target: ChatTarget, content: readonly PromptPart[]): ModelRoute | undefined {
     const carried = this.options.bindings.forChat(target)?.hasImages === true
-    if (!carriesImage(content) && !carried) return undefined
-    return this.options.visionRoute?.()
+
+    // An image outranks the conversation's own choice: a model that cannot see
+    // fails the whole request, so this is not a preference to honour.
+    if (carriesImage(content) || carried) {
+      return this.options.visionRoute?.() ?? this.options.chosenRoute?.(target)
+    }
+
+    return this.options.chosenRoute?.(target)
+  }
+
+  /**
+   * Point a conversation at a session it had before.
+   *
+   * The session is not loaded here: the next message resumes it through the
+   * ordinary path, which is also the path that handles a log that can no
+   * longer be read.
+   *
+   * @param target - the conversation.
+   * @param sessionId - a session this chat had earlier.
+   */
+  async adopt(target: ChatTarget, sessionId: string): Promise<void> {
+    await this.serialize(target, async () => {
+      const binding = this.options.bindings.forChat(target)
+      if (binding?.sessionId === sessionId) return
+
+      // Released rather than disposed: the conversation being left is one the
+      // user may well come back to, and disposing would end it.
+      await this.options.bindings.bind(target, sessionId)
+    })
   }
 
   /**
@@ -284,13 +346,22 @@ export class SessionRunner implements AgentRunner {
     }
 
     const sessionId = this.newSessionId()
-    const agent = await this.options.host.create(sessionId, this.options.cwdFor(target))
+    const cwd = this.options.cwdFor(target)
+    const agent = await this.options.host.create(sessionId, cwd)
 
     // After creation, because the harness pins an initial permission before
     // publishing the session; switching afterwards is the supported path.
     this.options.permission?.apply(sessionId)
 
     await this.options.bindings.bind(target, sessionId)
+    await this.options.history
+      ?.remember(target, { sessionId, startedAt: Date.now(), cwd })
+      .catch((error: unknown) => {
+        // Losing the entry costs a way back to this conversation, not the
+        // conversation itself.
+        this.logger.warn('[dsh-telegram] could not record the conversation', error)
+      })
+
     return agent
   }
 

@@ -27,6 +27,8 @@ export const COMMANDS: Readonly<Record<string, string>> = {
   claim: 'Take ownership of an unclaimed bot: /claim <code>',
   new: 'Start a fresh conversation, forgetting the current one',
   cd: 'Show or change the working directory: /cd ~/projects/app',
+  model: 'Show or change the model: /model list, or /model provider/model',
+  sessions: 'Pick up an earlier conversation from this chat',
   status: 'Show the session, working directory, and who owns the bot',
   stop: 'Cancel whatever the agent is doing right now',
   whoami: 'Show your Telegram user id',

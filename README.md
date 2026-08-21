@@ -111,9 +111,51 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/claim <code>` | Take ownership of an unclaimed bot |
 | `/new` | Start a fresh conversation, forgetting the current one |
 | `/cd [path]` | Show or change the working directory |
+| `/model [what]` | Show the model, `/model list`, or switch to one |
+| `/sessions` | Pick up an earlier conversation from this chat |
 | `/status` | Session id, working directory, and whether it is loaded |
 | `/stop` | Cancel whatever the agent is doing right now |
 | `/whoami` | Your Telegram user id |
+
+### In a group
+
+A bot that answers every line is one nobody keeps in the room, so in a group it
+answers only when @mentioned or replied to — the convention people already use.
+Its own mention is stripped before the prompt, because that is addressing
+rather than content, and replying to something it said continues the exchange
+without an @mention on every line. Private chats are untouched. Set
+`requireMentionInGroups` to `false` for the older behaviour.
+
+The mention is compared against Telegram's own parsed span rather than searched
+for in the text: `@mybot_staging` contains `@mybot`, and a substring match would
+hand another bot's mentions to this one.
+
+### What the agent is allowed to do
+
+A deployment picks one permission default for everything it runs, usually with
+the web UI in mind: loopback-only, with a person watching. A Telegram bot is
+reachable from anywhere and gated by a list of user ids, so the same
+`danger-full-access` reads differently there. `permissionPreset` names one of
+the deployment's own presets for Telegram conversations alone.
+
+It also decides whether the approval buttons work: under a preset whose
+approval policy is `never` nothing ever asks, so they can never appear.
+Choosing one that asks is what turns them on.
+
+### Which model, and which conversation
+
+`/model` says which model the conversation is on, `/model list` shows what is
+configured, and `/model provider/model` switches. A bare model id works when
+only one provider offers it; when several do, it asks which. Unlike `/cd` this
+does not restart anything — the harness reads a mutable selection while
+assembling each step, so the change lands on the next message with the history
+intact. `/model default` gives the conversation back to the deployment.
+
+`/sessions` offers this chat's earlier conversations as buttons. `/new` is
+otherwise a one-way door: the harness keeps every log, but the binding naming
+the current one is replaced, and from a phone there is no other way back. The
+list is this plugin's own, so it holds conversations from this chat rather than
+every session the web UI ever opened.
 
 ### Which tools the agent has
 
@@ -253,6 +295,8 @@ Every field has a working default; an empty config runs.
 | `allowFrom` | `[]` | User ids allowed in; empty enables the claim flow |
 | `cwd` | harness cwd | Directory a conversation starts in until `/cd` moves it |
 | `agentPreset` | `""` | Preset Telegram conversations are composed from; empty takes the deployment default. The preset supplies the tools |
+| `permissionPreset` | `""` | Permission preset Telegram runs under, from the deployment's own table; empty follows the deployment default |
+| `requireMentionInGroups` | `true` | In a group, answer only when @mentioned or replied to |
 | `streaming.enabled` | `true` | Show the answer as it is written |
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
 | `streaming.placeholder` | `…` | Body shown under a tool-activity line before any text arrives |
@@ -390,8 +434,6 @@ would break every hook the moment the page mounted.
 
 ## Known limitations
 
-- **Groups have no gating.** In a group the bot answers every message from an
-  allowlisted user — no mention or reply required.
 - **Reasoning effort is not carried.** Only provider and model reach a Telegram
   session; an effort chosen in Settings → Models does not.
 - **One directory per conversation.** `/cd` moves a conversation, but a

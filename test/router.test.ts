@@ -27,6 +27,8 @@ async function build(
     workspace?: boolean
     /** Set false to answer every group message, the older behaviour. */
     requireAddressing?: boolean
+    /** Set false to run without a model catalog, as a bare deployment does. */
+    models?: boolean
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
@@ -71,6 +73,20 @@ async function build(
     },
   }
 
+  /** The conversation's model, and every /model that changed it. */
+  let model: string | undefined
+  const models = {
+    describe: () => model ?? 'the deployment default',
+    list: async () => '<b>DeepSeek</b>\n• <code>deepseek-official/deepseek-v4-pro</code>',
+    choose: async (_target: { chatId: string }, input: string) => {
+      if (input === 'ambiguous') return { kind: 'ambiguous' as const, candidates: ['a/m', 'b/m'] }
+      if (!input.includes('/')) return { kind: 'unknown' as const }
+      model = input
+      return { kind: 'route' as const, route: input }
+    },
+    clear: async () => void (model = undefined),
+  }
+
   const router = new UpdateRouter({
     chat: {
       sendMessage: async ({ html }) => void said.push(html),
@@ -81,6 +97,7 @@ async function build(
     approvals,
     ...(options.typing === false ? {} : { typing }),
     ...(options.workspace === false ? {} : { workspace }),
+    ...(options.models === false ? {} : { models }),
     textCapture,
     runner,
     botUsername: 'my_bot',
@@ -105,6 +122,8 @@ async function build(
     typing: () => holds.some((entry) => !entry.released),
     /** Where the conversation is working now. */
     directory: () => directory,
+    /** Which model it is talking to now. */
+    model: () => model,
   }
 }
 
@@ -401,6 +420,70 @@ describe('UpdateRouter — /cd', () => {
     const { router, directory } = await build()
     await router.handle(message('/cd /srv/app', STRANGER))
     expect(directory()).toBe('/work')
+  })
+})
+
+describe('UpdateRouter — /model', () => {
+  it('reports the model in force when given nothing', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/model'))
+    expect(said[0]).toContain('the deployment default')
+  })
+
+  it('lists what is configured', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/model list'))
+    expect(said[0]).toContain('deepseek-official/deepseek-v4-pro')
+  })
+
+  it('changes the model', async () => {
+    const { router, said, model } = await build()
+    await router.handle(message('/model xiaomi/mimo-v2.5'))
+
+    expect(model()).toBe('xiaomi/mimo-v2.5')
+    expect(said[0]).toContain('xiaomi/mimo-v2.5')
+  })
+
+  it('does not restart the conversation, unlike /cd', async () => {
+    // The harness reads a mutable selection while assembling each step, so a
+    // model change lands on the next message with the history intact.
+    const { router, runner, said } = await build()
+    await router.handle(message('/model xiaomi/mimo-v2.5'))
+
+    expect(runner.reset).not.toHaveBeenCalled()
+    expect(said[0]).toContain('next message')
+  })
+
+  it('returns to the deployment default', async () => {
+    const { router, said, model } = await build()
+    await router.handle(message('/model xiaomi/mimo-v2.5'))
+    await router.handle(message('/model default'))
+
+    expect(model()).toBeUndefined()
+    expect(said[1]).toContain('the deployment default')
+  })
+
+  it('asks which one when several providers offer the name', async () => {
+    const { router, said, model } = await build()
+    await router.handle(message('/model ambiguous'))
+
+    expect(model()).toBeUndefined()
+    expect(said[0]).toContain('a/m')
+    expect(said[0]).toContain('b/m')
+  })
+
+  it('says so for a model nobody offers, and points at the list', async () => {
+    const { router, said, model } = await build()
+    await router.handle(message('/model imaginary'))
+
+    expect(model()).toBeUndefined()
+    expect(said[0]).toContain('/model list')
+  })
+
+  it('says so where the deployment offers no catalog', async () => {
+    const { router, said } = await build({ models: false })
+    await router.handle(message('/model list'))
+    expect(said[0]).toContain('does not allow')
   })
 })
 

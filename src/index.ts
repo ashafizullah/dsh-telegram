@@ -36,11 +36,18 @@ import { TextCapture } from './interact/text-capture.js'
 import { TurnBridge } from './reply/turn-bridge.js'
 import { canStreamTo } from './reply/rich-stream.js'
 import { UpdateRouter } from './router.js'
+import type { ModelControl } from './router.js'
+import { escapeHtml } from './render/escape.js'
 import { BindingStore } from './session/bindings.js'
 import { RecoveryOffer } from './session/recovery.js'
 import { SessionRunner } from './session/runner.js'
 import { PermissionControl } from './session/permission.js'
-import { WorkspaceStore, resolveDirectory } from './session/workspaces.js'
+import { ChatHistory } from './session/history.js'
+import { SessionPicker } from './session/picker.js'
+import { isUsableDirectory, resolveDirectory } from './session/workspaces.js'
+import { ChatPreferences } from './session/preferences.js'
+import { formatRoute, listCatalog, matchRoute } from './session/models.js'
+import type { CatalogProvider, ProviderCatalog } from './session/models.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
@@ -310,7 +317,9 @@ async function start(
 
   // Kept apart from the bindings deliberately: a binding dies with `/new`,
   // while the directory a person chose belongs to the chat and must outlive it.
-  const workspaces = await WorkspaceStore.open(join(home, 'workspaces.json'))
+  const workspaces = await ChatPreferences.open(join(home, 'workspaces.json'), {
+    accept: isUsableDirectory,
+  })
   const cwdFor = (target: ChatTarget) => workspaces.forChat(target) ?? cwd
 
   // Shares the host with the runner so a reading runs on the same harness the
@@ -331,11 +340,23 @@ async function start(
     logger,
   })
 
+  // Durable per chat, so a model chosen from a phone survives `/new` and a
+  // restart. Validated on read as well as on write: a model configured
+  // yesterday may be gone today.
+  const chosenModels = await ChatPreferences.open(join(home, 'models.json'), {
+    accept: (value) => parseRoute(value) !== undefined,
+  })
+  const chosenRoute = (target: ChatTarget) => parseRoute(chosenModels.forChat(target))
+
+  const history = await ChatHistory.open(join(home, 'history.json'))
+
   const runner = new SessionRunner({
     host,
     bindings,
     cwdFor,
+    chosenRoute,
     permission,
+    history,
     extractor,
     // The fallback for a picture that could not be read: the conversation
     // itself moves, and stays moved.
@@ -369,13 +390,33 @@ async function start(
       })
     : undefined
 
+  const sessionPicker = new SessionPicker({
+    surface,
+    pending,
+    history,
+    currentSession: (target) => bindings.forChat(target)?.sessionId,
+    adopt: (target, sessionId) => runner.adopt(target, sessionId),
+    logger,
+  })
+
   const router = new UpdateRouter({
     chat: api,
     access,
     questions,
     approvals,
     recovery,
+    sessions: sessionPicker,
     typing,
+    ...(catalog
+      ? {
+          models: buildModelControl({
+            catalog: catalog as unknown as ProviderCatalog,
+            store: chosenModels,
+            chosen: chosenRoute,
+            fallback: () => selectModel(ctx, logger),
+          }),
+        }
+      : {}),
     workspace: {
       current: cwdFor,
       resolve: (input, current) => resolveDirectory(input, current, homedir()),
@@ -610,6 +651,55 @@ function selectModel(ctx: PluginContext, logger: Logger): ModelRoute | undefined
  */
 function attachmentStore(ctx: PluginContext): unknown {
   return ctx.get('attachments')
+}
+
+/**
+ * The `/model` seam, over the harness catalog and the durable choice.
+ *
+ * Assembled here rather than inside the router so the router stays testable
+ * without a provider catalog, and so the rendering — which is Telegram HTML —
+ * sits beside the other message building.
+ */
+function buildModelControl(options: {
+  catalog: ProviderCatalog
+  store: ChatPreferences
+  chosen: (target: ChatTarget) => ModelRoute | undefined
+  fallback: () => ModelRoute | undefined
+}): ModelControl {
+  return {
+    describe: (target) => formatRoute(options.chosen(target) ?? options.fallback()),
+
+    async list() {
+      let providers: CatalogProvider[]
+      try {
+        providers = await listCatalog(options.catalog)
+      } catch {
+        return 'Could not read the configured models.'
+      }
+      if (providers.length === 0) return 'No models are configured. Add one in Settings → Models.'
+
+      return providers
+        .map((provider) => {
+          const rows = provider.models
+            .map((model) => `• <code>${escapeHtml(`${provider.id}/${model.id}`)}</code>`)
+            .join('\n')
+          return `<b>${escapeHtml(provider.name ?? provider.id)}</b>\n${rows}`
+        })
+        .join('\n\n')
+    },
+
+    async choose(target, input) {
+      const providers = await listCatalog(options.catalog).catch(() => [])
+      const matched = matchRoute(input, providers)
+      if (matched.kind !== 'route') return matched
+
+      const route = `${matched.route.provider}/${matched.route.model}`
+      await options.store.set(target, route)
+      return { kind: 'route', route }
+    },
+
+    clear: (target) => options.store.clear(target),
+  }
 }
 
 /**

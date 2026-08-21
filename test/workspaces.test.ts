@@ -4,7 +4,8 @@ import { join } from 'node:path'
 
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { WorkspaceStore, resolveDirectory } from '../src/session/workspaces.js'
+import { isUsableDirectory, resolveDirectory } from '../src/session/workspaces.js'
+import { ChatPreferences } from '../src/session/preferences.js'
 
 const CHAT = { chatId: '1' }
 const HOME = '/Users/adam'
@@ -60,7 +61,7 @@ describe('resolveDirectory — the spellings people actually type', () => {
   })
 })
 
-describe('WorkspaceStore', () => {
+describe('ChatPreferences — as the directory store', () => {
   let file: string
 
   beforeEach(async () => {
@@ -68,26 +69,26 @@ describe('WorkspaceStore', () => {
   })
 
   it('starts empty, so every chat uses the configured default', async () => {
-    const store = await WorkspaceStore.open(file)
+    const store = await ChatPreferences.open(file, { accept: isUsableDirectory })
     expect(store.forChat(CHAT)).toBeUndefined()
   })
 
   it('remembers a directory', async () => {
-    const store = await WorkspaceStore.open(file)
+    const store = await ChatPreferences.open(file, { accept: isUsableDirectory })
     await store.set(CHAT, '/work/app')
     expect(store.forChat(CHAT)).toBe('/work/app')
   })
 
   it('survives a restart, which is the whole reason it is a file', async () => {
-    const first = await WorkspaceStore.open(file)
+    const first = await ChatPreferences.open(file, { accept: isUsableDirectory })
     await first.set(CHAT, '/work/app')
 
-    const second = await WorkspaceStore.open(file)
+    const second = await ChatPreferences.open(file, { accept: isUsableDirectory })
     expect(second.forChat(CHAT)).toBe('/work/app')
   })
 
   it('keeps conversations apart', async () => {
-    const store = await WorkspaceStore.open(file)
+    const store = await ChatPreferences.open(file, { accept: isUsableDirectory })
     await store.set(CHAT, '/work/app')
     await store.set({ chatId: '2' }, '/work/other')
 
@@ -96,7 +97,7 @@ describe('WorkspaceStore', () => {
   })
 
   it('treats a forum topic as its own conversation', async () => {
-    const store = await WorkspaceStore.open(file)
+    const store = await ChatPreferences.open(file, { accept: isUsableDirectory })
     await store.set({ chatId: '1', threadId: 7 }, '/work/topic')
 
     expect(store.forChat({ chatId: '1', threadId: 7 })).toBe('/work/topic')
@@ -104,7 +105,7 @@ describe('WorkspaceStore', () => {
   })
 
   it('returns a conversation to the default when cleared', async () => {
-    const store = await WorkspaceStore.open(file)
+    const store = await ChatPreferences.open(file, { accept: isUsableDirectory })
     await store.set(CHAT, '/work/app')
     await store.clear(CHAT)
     expect(store.forChat(CHAT)).toBeUndefined()
@@ -115,7 +116,7 @@ describe('WorkspaceStore', () => {
     const { writeFile } = await import('node:fs/promises')
     await writeFile(file, '{ not json', 'utf8')
 
-    const store = await WorkspaceStore.open(file)
+    const store = await ChatPreferences.open(file, { accept: isUsableDirectory })
     expect(store.forChat(CHAT)).toBeUndefined()
   })
 
@@ -125,7 +126,7 @@ describe('WorkspaceStore', () => {
     const { writeFile } = await import('node:fs/promises')
     await writeFile(file, JSON.stringify({ '1': 'work/app', '2': '/work/ok' }), 'utf8')
 
-    const store = await WorkspaceStore.open(file)
+    const store = await ChatPreferences.open(file, { accept: isUsableDirectory })
     expect(store.forChat(CHAT)).toBeUndefined()
     expect(store.forChat({ chatId: '2' })).toBe('/work/ok')
   })

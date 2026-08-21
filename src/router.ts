@@ -63,6 +63,30 @@ export interface WorkspaceControl {
   set(target: ChatTarget, directory: string): Promise<void>
 }
 
+/**
+ * The conversation's model, and how to change it.
+ *
+ * Narrowed to what the router needs, so `/model` is testable without a
+ * provider catalog behind it.
+ */
+export interface ModelControl {
+  /** The route in force, rendered the way it is typed back in. */
+  describe(target: ChatTarget): string
+  /** Every configured provider and model, as Telegram HTML. */
+  list(): Promise<string>
+  /** Take a user's words and, when they name one model, adopt it. */
+  choose(
+    target: ChatTarget,
+    input: string,
+  ): Promise<
+    | { kind: 'route'; route: string }
+    | { kind: 'ambiguous'; candidates: readonly string[] }
+    | { kind: 'unknown' }
+  >
+  /** Return the conversation to the deployment's own model. */
+  clear(target: ChatTarget): Promise<void>
+}
+
 /** Shows that a conversation is being worked on, until released. */
 export interface TypingHold {
   hold(target: ChatTarget): () => void
@@ -88,6 +112,10 @@ export interface UpdateRouterOptions {
   readonly typing?: TypingHold
   /** Absent leaves every conversation in the configured directory. */
   readonly workspace?: WorkspaceControl
+  /** Absent leaves every conversation on the deployment's model. */
+  readonly models?: ModelControl
+  /** Offers this chat's earlier conversations. Absent makes `/new` one-way. */
+  readonly sessions?: CallbackHandler & { offer(target: ChatTarget): Promise<void> }
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
@@ -151,7 +179,8 @@ export class UpdateRouter {
     const routed =
       this.options.questions.handleCallback(query.data) ||
       this.options.approvals.handleCallback(query.data) ||
-      (this.options.recovery?.handleCallback(query.data) ?? false)
+      (this.options.recovery?.handleCallback(query.data) ?? false) ||
+      (this.options.sessions?.handleCallback(query.data) ?? false)
 
     if (!routed) {
       this.logger.debug('[dsh-telegram] ignoring a stale or unknown button press')
@@ -286,6 +315,15 @@ export class UpdateRouter {
       case 'cd':
         return await this.onChangeDirectory(target, args)
 
+      case 'model':
+        return await this.onModel(target, args)
+
+      case 'sessions':
+        if (!this.options.sessions) {
+          return await this.say(target, 'This deployment does not keep a conversation list.')
+        }
+        return await this.options.sessions.offer(target)
+
       case 'stop': {
         const stopped = await this.options.runner.stop(target)
         return await this.say(target, stopped ? '🛑 Stopped.' : 'Nothing was running.')
@@ -315,6 +353,64 @@ export class UpdateRouter {
       await this.say(target, `⚠️ ${escapeHtml(reason)}`)
     } finally {
       release?.()
+    }
+  }
+
+  /**
+   * Show, list, or change the model this conversation talks to.
+   *
+   * No reset here, unlike `/cd`: the harness reads a mutable selection while
+   * assembling each step, so a model change lands on the very next message and
+   * the conversation carries on.
+   *
+   * @param target - the conversation.
+   * @param args - what followed `/model`.
+   */
+  private async onModel(target: ChatTarget, args: string): Promise<void> {
+    const models = this.options.models
+    if (!models) {
+      return await this.say(target, 'This deployment does not allow changing the model.')
+    }
+
+    const wanted = args.trim()
+
+    if (wanted === '') {
+      return await this.say(
+        target,
+        `🧠 <code>${escapeHtml(models.describe(target))}</code>\n\n` +
+          'See them with <code>/model list</code>, or change it with ' +
+          '<code>/model provider/model</code>.',
+      )
+    }
+
+    if (wanted.toLowerCase() === 'default') {
+      await models.clear(target)
+      return await this.say(target, `🧠 Back to <code>${escapeHtml(models.describe(target))}</code>.`)
+    }
+
+    if (wanted.toLowerCase() === 'list') return await this.say(target, await models.list())
+
+    const chosen = await models.choose(target, wanted)
+    switch (chosen.kind) {
+      case 'route':
+        return await this.say(
+          target,
+          `🧠 Now talking to <code>${escapeHtml(chosen.route)}</code>.\n\n` +
+            'It applies from your next message; this conversation carries on.',
+        )
+      case 'ambiguous':
+        return await this.say(
+          target,
+          `Several providers offer that. Name one:\n${chosen.candidates
+            .map((candidate) => `• <code>${escapeHtml(candidate)}</code>`)
+            .join('\n')}`,
+        )
+      default:
+        return await this.say(
+          target,
+          `⚠️ No configured model called <code>${escapeHtml(wanted)}</code>. ` +
+            'Try <code>/model list</code>.',
+        )
     }
   }
 
