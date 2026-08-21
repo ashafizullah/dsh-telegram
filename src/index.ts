@@ -57,6 +57,7 @@ import { createAgentHost } from './harness/host.js'
 import type { AgentPresetsLike } from './harness/host.js'
 import { TypingIndicator } from './telegram/typing.js'
 import { VisionExtractor } from './media/extractor.js'
+import { OcrReader } from './media/ocr.js'
 import { MediaCollector } from './media/collect.js'
 import { VisionCheck } from './media/vision.js'
 import type { ModelCatalog } from './media/vision.js'
@@ -337,10 +338,19 @@ async function start(
 
   // Shares the host with the runner so a reading runs on the same harness the
   // conversation does — but never in the conversation's own session.
+  // Never assumed: tesseract ships with no operating system this runs on, so
+  // its absence is the ordinary case. Probed once, and simply reads nothing
+  // where it is missing.
+  const ocr = config.media.ocr.enabled
+    ? new OcrReader({ languages: config.media.ocr.languages, logger })
+    : undefined
+
   const extractor = new VisionExtractor({
     host,
     cwd,
     visionModel: () => parseRoute(config.media.visionModel),
+    ...(ocr ? { fallback: ocr } : {}),
+    ...(attachmentStore(ctx) ? { attachments: attachmentStore(ctx) as never } : {}),
     logger,
   })
 
@@ -420,6 +430,7 @@ async function start(
         ...(attachmentStore(ctx) ? { attachments: attachmentStore(ctx) as never } : {}),
         maxBytes: config.media.maxBytes,
         maxTextChars: config.media.maxTextChars,
+        ...(ocr ? { canReadWithoutModel: () => ocr.available() } : {}),
         redact: secrets.redactor(),
         logger,
       })
@@ -473,6 +484,14 @@ async function start(
             { label: 'Streaming', value: config.streaming.enabled ? 'on' : 'off' },
             { label: 'Attachments', value: config.media.enabled ? 'on' : 'off' },
             { label: 'Screenshots', value: config.screenshot.enabled ? 'on' : 'off' },
+            {
+              label: 'OCR fallback',
+              value: ocr === undefined
+                ? 'off'
+                : (await ocr.available())
+                  ? `tesseract, ${config.media.ocr.languages}`
+                  : 'on, but tesseract is not installed',
+            },
             { label: 'Groups', value: config.requireMentionInGroups ? 'mention required' : 'open' },
           ],
           seams: seamReport(),

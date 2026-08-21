@@ -316,6 +316,32 @@ models reach the harness through a provider that carries them, such as an
 OpenAI-compatible route added in Settings → Models, whose model entry declares
 `input: [text, image]`.
 
+### When no model can look
+
+With no vision model configured the image used to be refused outright, and the
+answer was a sentence about model configuration rather than anything about the
+picture. If `tesseract` is installed, its text is read instead.
+
+It is a fallback and says so. OCR reads text; it does not see. A screenshot of
+an error, a log or a receipt comes back cleanly — crisp text, high contrast, no
+perspective is exactly its best case — while a whiteboard, an architecture
+diagram or a chart comes back as scattered words with nothing to say what the
+picture was. The reading is therefore labelled as OCR wherever it goes: an
+agent handed unlabelled OCR treats a misread digit as a fact, and a receipt's
+amount is precisely what it gets wrong.
+
+Tesseract is never assumed. No operating system this runs on ships it, so its
+absence is the ordinary case: it is probed once, and where it is missing the
+old refusal stands — now naming both ways forward. `/diag` says which of the
+two this machine has.
+
+The same fallback covers a vision model that was configured but could not be
+reached, for the same reason: reading the text beats returning nothing.
+
+Latin script reads well with `eng` alone — Indonesian, numbers, dates and
+amounts all come through — so `media.ocr.languages` only needs changing for a
+different script. `tesseract --list-langs` says what is installed.
+
 ### When a conversation gets stuck
 
 A turn can fail in a way no retry clears — most often that one: an earlier
@@ -366,6 +392,8 @@ Every field has a working default; an empty config runs.
 | `media.enabled` | `true` | Read images and text files the user sends |
 | `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
 | `media.maxTextChars` | `60000` | Truncate an inlined text file to this many characters |
+| `media.ocr.enabled` | `true` | Read an image's text with tesseract when no vision model can. Does nothing unless tesseract is installed |
+| `media.ocr.languages` | `eng` | Languages tesseract reads; join several with `+`. Only installed ones work |
 | `media.visionModel` | `""` | `provider/model` that reads images in a session of its own; empty sends the image to the conversation itself. Picked from a dropdown on the settings page |
 | `reconnect.baseDelayMs` | `1000` | Delay before the first reconnect attempt |
 | `reconnect.maxDelayMs` | `30000` | Longest delay between reconnect attempts |

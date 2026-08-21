@@ -67,6 +67,25 @@ export const Config = Schema.object({
     maxTextChars: Schema.natural()
       .default(60_000)
       .description('Truncate an inlined text file to this many characters.'),
+    ocr: Schema.object({
+      enabled: Schema.boolean()
+        .default(true)
+        .description(
+          'Read an image\'s text with tesseract when no vision model is ' +
+            'configured, or when the one configured could not be reached. Does ' +
+            'nothing unless tesseract is installed, which no operating system ' +
+            'does by default. It reads text and does not see: a diagram or a ' +
+            'chart comes back as scattered words.',
+        ),
+      languages: Schema.string()
+        .default('eng')
+        .description(
+          'Languages to read, as tesseract names them; join several with +, ' +
+            'as in eng+ind. Only languages installed on this machine work — ' +
+            '`tesseract --list-langs` says which.',
+        ),
+    }),
+
     visionModel: Schema.string()
       .default('')
       .description(

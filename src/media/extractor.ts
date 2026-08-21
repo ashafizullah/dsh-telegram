@@ -18,6 +18,7 @@ import type { PromptPart } from './collect.js'
 import type { ModelRoute } from '../harness/model-selection.js'
 import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
+import { labelOcr } from './ocr.js'
 
 /** What the vision model is asked to do with the picture. */
 const INSTRUCTION =
@@ -47,12 +48,31 @@ export interface ExtractionEvent {
   readonly data?: unknown
 }
 
+/** Reading an image's text without a model, when there is no model. */
+export interface FallbackReader {
+  available(): Promise<boolean>
+  read(data: Uint8Array): Promise<string | undefined>
+}
+
+/** Fetching the bytes back for a stored attachment. */
+export interface AttachmentReader {
+  readImage(ref: unknown): Promise<{ data: Uint8Array }>
+}
+
 /** Construction options. */
 export interface VisionExtractorOptions {
   readonly host: ExtractionHost
   readonly cwd: string
-  /** The model to read with; undefined disables extraction entirely. */
+  /** The model to read with; undefined leaves only the fallback. */
   readonly visionModel: () => ModelRoute | undefined
+  /**
+   * OCR, for when no vision model is configured or the one configured could
+   * not be reached. Strictly a fallback: it reads text and does not see, so a
+   * model that can look is always preferred.
+   */
+  readonly fallback?: FallbackReader
+  /** Reads a stored image back, which the fallback needs and the model does not. */
+  readonly attachments?: AttachmentReader
   readonly newSessionId?: () => string
   readonly timeoutMs?: number
   readonly logger?: Logger
@@ -74,9 +94,16 @@ export class VisionExtractor {
     this.logger = options.logger ?? SILENT_LOGGER
   }
 
-  /** Whether an image can be read at all right now. */
+  /**
+   * Whether an image can be read at all right now.
+   *
+   * Optimistic about the fallback: probing Tesseract spawns a process, and
+   * this is consulted on the path of every message. A fallback that turns out
+   * to be absent simply reads nothing, which is the same outcome as saying so
+   * here would have been.
+   */
   get available(): boolean {
-    return this.options.visionModel() !== undefined
+    return this.options.visionModel() !== undefined || this.options.fallback !== undefined
   }
 
   /**
@@ -88,29 +115,82 @@ export class VisionExtractor {
    */
   async resolve(content: readonly PromptPart[]): Promise<PromptPart[]> {
     const images = content.filter((part) => part.type === 'image')
+    if (images.length === 0) return [...content]
+
+    // A route is no longer required: without one there is still OCR, and
+    // without either the prompt says so rather than carrying an image that
+    // nothing downstream can use.
     const route = this.options.visionModel()
-    if (images.length === 0 || !route) return [...content]
+    if (route === undefined && this.options.fallback === undefined) return [...content]
 
     const said = content
       .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
       .map((part) => part.text)
 
-    const read = await this.read(images, route)
-    if (read === undefined) {
+    const read = route === undefined ? undefined : await this.read(images, route)
+    if (read !== undefined) {
+      // The user's own words first: the image is what they are asking about.
       return [
         ...said.map((text) => ({ type: 'text' as const, text })),
-        {
-          type: 'text' as const,
-          text: `(The user sent an image, but it could not be read by ${route.model}.)`,
-        },
+        { type: 'text' as const, text: `Contents of the image the user sent:\n\n${read}` },
       ]
     }
 
-    // The user's own words first: the image is what they are asking about.
+    // Reached either because nothing was configured to look, or because what
+    // was configured could not be reached. Both are cases where reading the
+    // text beats returning nothing at all.
+    const scanned = await this.scan(images)
+    if (scanned !== undefined) {
+      return [...said.map((text) => ({ type: 'text' as const, text })), { type: 'text' as const, text: scanned }]
+    }
+
     return [
       ...said.map((text) => ({ type: 'text' as const, text })),
-      { type: 'text' as const, text: `Contents of the image the user sent:\n\n${read}` },
+      {
+        type: 'text' as const,
+        text:
+          route === undefined
+            ? '(The user sent an image, but nothing here can read one. Configure a vision model in Settings → Telegram, or install tesseract.)'
+            : `(The user sent an image, but it could not be read by ${route.model}.)`,
+      },
     ]
+  }
+
+  /**
+   * Read every image's text with the fallback.
+   *
+   * The bytes come back from the attachment store rather than being kept
+   * around: the model path never needs them, and holding every image in memory
+   * against the chance that a model call fails would be a strange thing to pay
+   * for on every message.
+   *
+   * @returns the readings joined, or undefined when there were none.
+   */
+  private async scan(images: readonly PromptPart[]): Promise<string | undefined> {
+    const { fallback, attachments } = this.options
+    if (!fallback || !attachments) return undefined
+    if (!(await fallback.available())) return undefined
+
+    const readings: string[] = []
+    for (const image of images) {
+      if (image.type !== 'image') continue
+
+      try {
+        const stored = await attachments.readImage(image.attachment)
+        const text = await fallback.read(stored.data)
+        if (text !== undefined) readings.push(text)
+      } catch (error) {
+        this.logger.warn('[dsh-telegram] could not read a stored image back', error)
+      }
+    }
+
+    if (readings.length === 0) return undefined
+
+    return labelOcr(
+      readings.length === 1
+        ? (readings[0] as string)
+        : readings.map((text, index) => `--- image ${index + 1} ---\n${text}`).join('\n\n'),
+    )
   }
 
   /**

@@ -201,6 +201,92 @@ describe('VisionExtractor — reading a picture', () => {
   })
 })
 
+/** An extractor with OCR behind it, and optionally no model in front. */
+function withFallback(
+  options: { model?: boolean; ocrText?: string; ocrThere?: boolean; timeoutMs?: number } = {},
+) {
+  const fake = fakeHost()
+  const extractor = new VisionExtractor({
+    host: fake.host,
+    cwd: '/work',
+    visionModel: () => (options.model === false ? undefined : VISION),
+    newSessionId: () => 'v1',
+    timeoutMs: options.timeoutMs ?? 2000,
+    fallback: {
+      available: async () => options.ocrThere !== false,
+      read: async () => options.ocrText,
+    },
+    attachments: { readImage: async () => ({ data: new Uint8Array([1, 2, 3]) }) },
+  })
+  return { extractor, fake }
+}
+
+describe('VisionExtractor — falling back to OCR', () => {
+  it('reads the text when no vision model is configured', async () => {
+    // Otherwise the image is refused outright and the user gets a sentence
+    // about model configuration instead of an answer.
+    const { extractor } = withFallback({ model: false, ocrText: 'Rp 250.000' })
+    const resolved = await extractor.resolve(withImage('how much?'))
+
+    expect(resolved[1]?.text).toContain('Rp 250.000')
+  })
+
+  it('labels it as OCR, so a misread digit is not taken as fact', async () => {
+    const { extractor } = withFallback({ model: false, ocrText: 'Rp 250.000' })
+    const resolved = await extractor.resolve(withImage('how much?'))
+
+    expect(resolved[1]?.text).toContain('OCR')
+    expect(resolved[1]?.text).toContain('may contain')
+  })
+
+  it('never opens a session when there is no model to open one on', async () => {
+    const { extractor, fake } = withFallback({ model: false, ocrText: 'Rp 250.000' })
+    await extractor.resolve(withImage('how much?'))
+
+    expect(fake.created).toEqual([])
+  })
+
+  it('prefers the model, since OCR reads text and does not see', async () => {
+    const { extractor, fake } = withFallback({ ocrText: 'from ocr' })
+
+    const resolving = extractor.resolve(withImage('how much?'))
+    await vi.waitFor(() => expect(fake.prompts).toHaveLength(1))
+    answer(extractor, 'v1', 'from the model')
+
+    expect((await resolving)[1]?.text).toContain('from the model')
+  })
+
+  it('falls back when the model was configured but could not be reached', async () => {
+    // The reading session never answers; its timeout ends it, and OCR is what
+    // stands between that and the user getting nothing.
+    const { extractor } = withFallback({ ocrText: 'Rp 250.000', timeoutMs: 30 })
+    const resolved = await extractor.resolve(withImage('how much?'))
+
+    expect(resolved[1]?.text).toContain('Rp 250.000')
+  })
+
+  it('says nothing can read an image when neither can', async () => {
+    const { extractor } = withFallback({ model: false, ocrThere: false })
+    const resolved = await extractor.resolve(withImage('how much?'))
+
+    expect(resolved[1]?.text).toContain('nothing here can read one')
+    expect(resolved[1]?.text).toContain('tesseract')
+  })
+
+  it('marks each image when several were sent together', async () => {
+    const { extractor } = withFallback({ model: false, ocrText: 'a receipt' })
+    const two = [
+      { type: 'text' as const, text: 'these two' },
+      { type: 'image' as const, attachment: { attachmentId: 'a1' } as never },
+      { type: 'image' as const, attachment: { attachmentId: 'a2' } as never },
+    ]
+
+    const resolved = await extractor.resolve(two)
+    expect(resolved[1]?.text).toContain('image 1')
+    expect(resolved[1]?.text).toContain('image 2')
+  })
+})
+
 describe('VisionExtractor — what it leaves alone', () => {
   it('passes a text-only prompt straight through', async () => {
     const fake = fakeHost()

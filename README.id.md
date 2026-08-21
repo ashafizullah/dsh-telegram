@@ -334,6 +334,34 @@ Model vision masuk ke harness lewat provider yang membawanya, misalnya route
 OpenAI-compatible yang kamu tambahkan di Settings → Models, yang entri modelnya
 menyebut `input: [text, image]`.
 
+### Kalau tidak ada model yang bisa melihat
+
+Kalau vision model belum diatur, dulu gambarnya ditolak mentah-mentah, dan yang
+kamu dapat cuma kalimat soal konfigurasi model — bukan apa pun tentang
+gambarnya. Sekarang, kalau `tesseract` terpasang, teksnya yang dibaca.
+
+Ini cadangan, dan dia mengatakannya sendiri. OCR membaca **teks**, dia tidak
+melihat. Screenshot error, log, atau struk keluar bersih — teks tajam, kontras
+tinggi, tanpa perspektif, itu kondisi terbaiknya. Tapi whiteboard, diagram
+arsitektur, atau grafik cuma jadi serakan kata tanpa ada yang bisa bilang itu
+gambar apa. Makanya hasilnya selalu dilabeli OCR ke mana pun dia pergi: agent
+yang menerima OCR tanpa label akan memperlakukan angka salah baca sebagai
+fakta, dan nominal di struk justru itu yang paling sering meleset.
+
+Tesseract tidak pernah diasumsikan ada. Tidak ada sistem operasi yang
+menyertakannya, jadi ketiadaannya justru kasus normal: dia dicek sekali di awal,
+dan kalau tidak ada, penolakan lama tetap berlaku — cuma sekarang menyebut
+**dua** jalan keluar. `/diag` memberitahu mesinmu punya yang mana.
+
+Cadangan yang sama juga menutup kasus vision model yang sudah diatur tapi tidak
+bisa dihubungi, dengan alasan yang sama: membaca teksnya lebih baik daripada
+mengembalikan nol.
+
+Aksara Latin terbaca bagus cuma dengan `eng` — bahasa Indonesia, angka, tanggal,
+dan nominal semuanya tembus — jadi `media.ocr.languages` baru perlu diubah
+untuk aksara yang berbeda. `tesseract --list-langs` menunjukkan apa yang
+terpasang.
+
 ### Kalau percakapan nyangkut
 
 Kadang sebuah turn gagal dengan cara yang tidak akan sembuh walau dicoba
@@ -386,6 +414,8 @@ masalah.
 | `media.enabled` | `true` | Baca gambar dan berkas teks yang dikirim |
 | `media.maxBytes` | `20 MB` | Tolak yang lebih besar; Telegram membatasi unduhan bot di situ |
 | `media.maxTextChars` | `60000` | Potong berkas teks pada jumlah karakter ini |
+| `media.ocr.enabled` | `true` | Baca teks gambar pakai tesseract kalau tidak ada vision model. Tidak berefek kalau tesseract belum terpasang |
+| `media.ocr.languages` | `eng` | Bahasa yang dibaca tesseract; gabung beberapa dengan `+`. Cuma yang terpasang yang jalan |
 | `media.visionModel` | `""` | `provider/model` yang membaca gambar di sesi tersendiri; kosong mengirim gambarnya ke percakapan itu sendiri |
 | `reconnect.baseDelayMs` | `1000` | Jeda sebelum percobaan sambung ulang pertama |
 | `reconnect.maxDelayMs` | `30000` | Jeda terpanjang antar percobaan sambung ulang |

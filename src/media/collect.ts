@@ -73,6 +73,13 @@ export interface MediaCollectorOptions {
    * lets the provider be the authority, which is the older behaviour.
    */
   readonly vision?: VisionCheck
+  /**
+   * Whether an image can be read even where no model accepts one — OCR.
+   *
+   * Consulted before refusing, because a refusal here happens before the
+   * download and so takes the picture away from whatever could have read it.
+   */
+  readonly canReadWithoutModel?: () => Promise<boolean>
   /** Refuse anything larger, before downloading it. */
   readonly maxBytes: number
   /** Truncate an inlined text file to this many characters. */
@@ -126,7 +133,11 @@ export class MediaCollector {
     }
 
     if (item.kind === 'image') {
-      const refusal = await this.imageRefusal()
+      // Skipped when something else can read the picture. The refusal exists
+      // to replace a failed turn with a useful sentence; with a fallback in
+      // place it would instead throw away an image that was going to be read.
+      const readable = (await this.options.canReadWithoutModel?.()) === true
+      const refusal = readable ? undefined : await this.imageRefusal()
       if (refusal) return this.declined(said, refusal.forAgent, refusal.forUser)
     }
 
