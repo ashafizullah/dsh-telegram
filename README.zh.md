@@ -472,6 +472,12 @@ pnpm typecheck     # host 与 browser 两半
 pnpm build         # host 用 tsc，浏览器包用 esbuild
 ```
 
+发布由 `.github/workflows/release.yml` 在推送 `v*` 标签时完成，走 npm 的可信发布：
+GitHub 通过 OIDC 证明该工作流的身份，npm 据此换发一份只在这一次发布期间有效的凭据。
+没有任何地方存放 token，也没有需要抢时间输入的一次性密码——当账号的第二因素是通行密钥
+而不是验证码时，这一点尤其重要。工作流会拒绝与 `package.json` 不一致的标签，因为那是
+它唯一可能悄无声息发布出去的错误。
+
 每个模块都能脱离 harness 运行，这正是测试套件跑得快的原因：插件入口是对着 Bot
 API 的真实 HTTP 桩来执行的，而浏览器包的物化方式与 shell 完全一致。
 

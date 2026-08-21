@@ -550,6 +550,14 @@ pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle
 ```
 
+Releases go out from `.github/workflows/release.yml` on a `v*` tag, over npm's
+trusted publishing: GitHub proves the workflow's identity over OIDC and npm
+exchanges that for a credential lasting one publish. There is no token stored
+anywhere and no one-time password to race — which matters when the account's
+second factor is a passkey rather than a code. The workflow refuses a tag that
+disagrees with `package.json`, since that is the one mistake it could otherwise
+publish silently.
+
 Every module runs without a harness, which is what keeps the suite fast: the
 plugin entry is exercised against a real HTTP stub of the Bot API, and the
 browser bundle is materialized exactly as the shell materializes it.

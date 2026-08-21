@@ -1,0 +1,65 @@
+# Publishes a tagged release to npm without a token.
+#
+# npm's trusted publishing: GitHub proves this workflow's identity to the
+# registry over OIDC, and npm exchanges that for a credential that lives for
+# the length of one publish. There is no NPM_TOKEN secret to store, leak,
+# rotate, or paste into a chat — and no one-time password to race, which
+# matters when the account's second factor is a passkey rather than a code.
+#
+# The registry checks the repository AND the workflow file name against what
+# the package has registered, so this file cannot be renamed without updating
+# the trusted publisher on npmjs.com.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+
+    permissions:
+      # The whole mechanism: without this the OIDC token is never minted and
+      # npm has nothing to trust.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs a newer CLI than the one bundled with Node 22.
+      - run: npm install -g npm@latest
+
+      - run: pnpm install --frozen-lockfile
+
+      # The same gates as CI, run again here rather than trusted from the tag:
+      # a tag can be pushed from a working tree that never went through CI.
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+      # Refuses a tag that disagrees with the manifest, which is the one
+      # mistake this workflow could otherwise publish silently.
+      - name: check the tag matches package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$manifest" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json $manifest" >&2
+            exit 1
+          fi
+
+      # No --otp and no NODE_AUTH_TOKEN: the OIDC exchange happens inside npm.
+      # Provenance is attached automatically, so the published tarball carries
+      # a signed record of the commit and workflow that built it.
+      - run: npm publish --access public

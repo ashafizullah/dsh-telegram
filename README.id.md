@@ -576,6 +576,14 @@ pnpm typecheck     # sisi host dan sisi browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser
 ```
 
+Rilis dikirim oleh `.github/workflows/release.yml` saat tag `v*` di-push, lewat
+trusted publishing npm: GitHub membuktikan identitas workflow-nya via OIDC, dan
+npm menukarnya jadi kredensial yang cuma hidup selama satu publish. Tidak ada
+token yang disimpan di mana pun, dan tidak ada OTP yang harus dikejar — yang
+penting kalau faktor kedua akunmu berupa passkey, bukan kode. Workflow-nya
+menolak tag yang tidak cocok dengan `package.json`, karena itu satu-satunya
+kesalahan yang bisa lolos terbit tanpa ketahuan.
+
 Semua modul bisa jalan tanpa harness, dan itu yang bikin test-nya cepat: entry
 plugin-nya diuji lawan stub HTTP Bot API sungguhan, dan bundle browser-nya
 dimuat persis seperti shell memuatnya.
