@@ -519,7 +519,27 @@ describe('SessionRunner — when the conversation\'s own model can see', () => {
     expect(fake.agents.get('s1')?.prompts).toEqual(['why does this look wrong?[image]'])
   })
 
-  it('does not move the conversation, since it is already where it belongs', async () => {
+  it('keeps the model the conversation chose, which is why it can see at all', async () => {
+    // Clearing the override here dropped the conversation back to the
+    // deployment default — so the check for "this model can see" undid the
+    // very choice it had just observed, and the turn failed on the old model.
+    const chosen = { provider: 'deepseek-official', model: 'deepseek-v4-flash-vision-exp' }
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      chosenRoute: () => chosen,
+      visionRoute: () => VISION,
+      modelSees: async () => true,
+    })
+
+    await runner.prompt(CHAT, withImage('count the people'))
+    expect(fake.agents.get('s1')?.routes).toEqual([chosen])
+  })
+
+  it('does not move it onto the reader, since it is already where it belongs', async () => {
     const fake = fakeHost()
     const runner = new SessionRunner({
       host: fake.host,
@@ -532,6 +552,24 @@ describe('SessionRunner — when the conversation\'s own model can see', () => {
 
     await runner.prompt(CHAT, withImage('look'))
     expect(fake.agents.get('s1')?.routes).toEqual([undefined])
+  })
+
+  it('keeps the chosen model on the next plain turn too', async () => {
+    const chosen = { provider: 'deepseek-official', model: 'deepseek-v4-flash-vision-exp' }
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      chosenRoute: () => chosen,
+      modelSees: async () => true,
+    })
+
+    await runner.prompt(CHAT, withImage('count the people'))
+    await runner.prompt(CHAT, text('and now the cars'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([chosen, chosen])
   })
 
   it('still extracts when the model cannot see', async () => {

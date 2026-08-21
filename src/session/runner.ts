@@ -200,7 +200,7 @@ export class SessionRunner implements AgentRunner {
       // Only reached when an image survived resolution. Set before the prompt:
       // the harness reads the selection while assembling each step, so the
       // override must be in place by the time the turn runs.
-      agent.useModel(sees ? undefined : this.routeFor(target, resolved))
+      agent.useModel(this.routeFor(target, resolved, sees))
 
       // Recorded BEFORE the turn runs, because from this point the session's
       // log carries an image and every later turn must be routed for it.
@@ -251,16 +251,25 @@ export class SessionRunner implements AgentRunner {
    * cannot see. The override therefore sticks to the conversation from the
    * first image until it is reset with `/new`.
    */
-  private routeFor(target: ChatTarget, content: readonly PromptPart[]): ModelRoute | undefined {
+  private routeFor(
+    target: ChatTarget,
+    content: readonly PromptPart[],
+    sees: boolean,
+  ): ModelRoute | undefined {
+    // The conversation's own choice always applies. Dropping it here is what
+    // made a model chosen with `/model` fall back to the deployment default —
+    // and since that choice is the whole reason the model could see, the check
+    // for "it can see" was undoing the thing it had just observed.
+    const chosen = this.options.chosenRoute?.(target)
+    if (sees) return chosen
+
     const carried = this.options.bindings.forChat(target)?.hasImages === true
 
     // An image outranks the conversation's own choice: a model that cannot see
     // fails the whole request, so this is not a preference to honour.
-    if (carriesImage(content) || carried) {
-      return this.options.visionRoute?.(target) ?? this.options.chosenRoute?.(target)
-    }
+    if (carriesImage(content) || carried) return this.options.visionRoute?.(target) ?? chosen
 
-    return this.options.chosenRoute?.(target)
+    return chosen
   }
 
   /**
