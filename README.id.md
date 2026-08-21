@@ -426,6 +426,14 @@ masalah.
 seam harness mana saja yang benar-benar dikomposisi deployment-mu, dan dua puluh
 hal terakhir yang gagal.
 
+Dia juga menyebut versi yang sedang jalan dan apakah ada yang lebih baru di
+npm — read-only, dan di-cache satu jam supaya bertanya dua kali tidak ada
+ongkosnya. Sengaja **tidak** ada `/update` yang menyertainya: update harness
+baru berlaku setelah restart, dan me-restart dari dalam plugin yang jalan di
+harness itu membunuh proses yang sedang menjawabmu — tanpa ada yang
+menghidupkannya lagi di mesin tanpa supervisor. Tahu bahwa kamu ketinggalan itu
+setengah yang berguna; melakukannya sebaiknya di tempat kamu bisa mengawasi.
+
 Daftar seam itu bagian yang paling berguna. Seam yang absen menjelaskan satu
 kelas utuh pertanyaan "kenapa dia tidak bisa begitu" tanpa siapa pun perlu
 menebak — `agentPresets` yang hilang itulah sebabnya agent Telegram dulu sampai

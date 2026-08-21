@@ -404,6 +404,14 @@ Every field has a working default; an empty config runs.
 harness seams this deployment actually composed, and the last twenty things
 that went wrong.
 
+It also says which versions are running and whether anything newer is
+published — read-only, and cached for an hour so asking twice costs nothing.
+There is deliberately no `/update` to go with it: updating the harness takes
+effect only after a restart, and restarting it from inside a plugin running in
+it kills the process answering you, with nothing to bring it back on a machine
+with no supervisor. Knowing you are behind is the useful half; acting on it
+belongs where you can watch it.
+
 The seam list is the useful part. An absent seam explains a whole class of "why
 does it not do that" without anyone having to guess — a missing `agentPresets`
 is why Telegram agents once reached the model with almost no tools, and nothing

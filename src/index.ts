@@ -19,8 +19,8 @@
 
 import { homedir } from 'node:os'
 import { stat } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, realpathSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { AccessPolicy } from './access.js'
@@ -45,6 +45,7 @@ import { SessionRunner } from './session/runner.js'
 import { PermissionControl, matchPreset } from './session/permission.js'
 import { PHOTO_LIMIT_BYTES, Screenshotter } from './media/screenshot.js'
 import { FailureLog, recordingLogger } from './failures.js'
+import { VersionCheck } from './versions.js'
 import { ChatHistory } from './session/history.js'
 import { SessionPicker } from './session/picker.js'
 import { isUsableDirectory, resolveDirectory } from './session/workspaces.js'
@@ -460,6 +461,11 @@ async function start(
       (name) => ({ name, present: ctx.get(name) !== undefined }),
     )
 
+  // Answers "am I behind?" without any of the risk of acting on it: updating
+  // the harness needs a restart, and restarting from inside it kills the
+  // process answering you.
+  const versions = new VersionCheck()
+
   const screenshotter = new Screenshotter({ logger })
   if (config.screenshot.enabled && !screenshotter.available) {
     logger.warn(`[dsh-telegram] /screenshot is on but ${process.platform} has no capture tool`)
@@ -479,7 +485,11 @@ async function start(
         return {
           status: [
             { label: 'Bot', value: me.username ? `@${me.username}` : String(me.id) },
-            { label: 'Plugin', value: PLUGIN_VERSION },
+            { label: 'Plugin', value: await describeVersion(versions, PACKAGE_NAME, PLUGIN_VERSION) },
+            {
+              label: 'Harness',
+              value: await describeVersion(versions, '@deepseek-ai/dsh', harnessVersion()),
+            },
             { label: 'Uptime', value: formatUptime(uptime) },
             { label: 'Streaming', value: config.streaming.enabled ? 'on' : 'off' },
             { label: 'Attachments', value: config.media.enabled ? 'on' : 'off' },
@@ -883,21 +893,88 @@ function buildModelControl(options: {
 }
 
 /**
+ * The harness's own version, read from the process that is running it.
+ *
+ * Derived rather than hard-coded: `process.argv[1]` is the script node was
+ * given, which for the harness is its own bin — so walking up from there finds
+ * the manifest the CLI's own `--version` reads. A plugin cannot simply import
+ * `@deepseek-ai/dsh`: under pnpm's isolated layout it resolves only its own
+ * declared dependencies, and the harness is the host's.
+ *
+ * @returns the version, or undefined when it cannot be worked out.
+ */
+function harnessVersion(): string | undefined {
+  const entry = process.argv[1]
+  if (entry === undefined) return undefined
+
+  try {
+    let directory = dirname(realpathSync(entry))
+
+    // Bounded: a walk that finds nothing must end, and no sane layout puts the
+    // manifest further up than this.
+    for (let depth = 0; depth < 5; depth += 1) {
+      try {
+        const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')) as {
+          name?: string
+          version?: string
+        }
+        // Checked by name, so a nested manifest cannot be mistaken for it.
+        if (manifest.name === '@deepseek-ai/dsh') return manifest.version
+      } catch {
+        // No manifest at this level; keep walking.
+      }
+
+      const parent = dirname(directory)
+      if (parent === directory) break
+      directory = parent
+    }
+  } catch {
+    return undefined
+  }
+
+  return undefined
+}
+
+/**
  * This plugin's version, for a report that has to say which build is running.
  *
  * Read from the manifest rather than hard-coded, so it cannot drift from the
  * package it was published as.
  */
-const PLUGIN_VERSION: string = (() => {
+const { version: PLUGIN_VERSION, name: PACKAGE_NAME } = ((): {
+  version: string
+  name: string
+} => {
   try {
     const manifest = JSON.parse(
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-    ) as { version?: string }
-    return manifest.version ?? 'unknown'
+    ) as { version?: string; name?: string }
+    return {
+      version: manifest.version ?? 'unknown',
+      name: manifest.name ?? '@ashafizullah/dsh-telegram',
+    }
   } catch {
-    return 'unknown'
+    return { version: 'unknown', name: '@ashafizullah/dsh-telegram' }
   }
 })()
+
+/**
+ * One version line: what is installed, and whether anything newer is published.
+ *
+ * Says nothing about the registry when it could not be reached, rather than
+ * claiming a version is current on the strength of a failed request.
+ */
+async function describeVersion(
+  versions: VersionCheck,
+  name: string,
+  installed: string | undefined,
+): Promise<string> {
+  if (installed === undefined) return 'unknown'
+
+  const report = await versions.check(name, installed)
+  if (report.latest === undefined) return installed
+  return report.behind ? `${installed} → ${report.latest} available` : `${installed} (latest)`
+}
 
 /** Seconds as something readable at a glance. */
 function formatUptime(seconds: number): string {
