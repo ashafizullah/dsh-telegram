@@ -45,19 +45,34 @@ export interface ModelRoute {
   readonly model: string
 }
 
+/**
+ * The preset roster, narrowed to what one agent's composition needs.
+ *
+ * A preset is where the tools live. The registries themselves are host-plane,
+ * but almost every model-facing row — bash, the editor, grep, skills,
+ * subagents, todo, plan mode — is registered into the PRESET's scope layer, so
+ * an agent that joins no preset reaches the model with only whatever the host
+ * composition registered globally. In this deployment that is the web tools
+ * and nothing else.
+ */
+export interface AgentPresetsLike {
+  resolve(id?: string): Promise<{ id: string }>
+  mount(agentCtx: unknown, id?: string): Promise<unknown>
+}
+
 /** The `ctx.agents` surface this plugin uses. */
 export interface AgentRegistryLike {
   get(sessionId: string): HarnessAgentLike | undefined
   create(options: {
     sessionId: string
-    meta?: { cwd?: string }
+    meta?: { cwd?: string; agentPreset?: string }
     agentOptions?: ModelRoute
-    setup?: (agentCtx: unknown) => void
+    setup?: (agentCtx: unknown) => void | Promise<void>
   }): Promise<HarnessAgentHandle>
   resume(options: {
     resumeSessionId: string
     agentOptions?: ModelRoute
-    setup?: (agentCtx: unknown) => void
+    setup?: (agentCtx: unknown) => void | Promise<void>
   }): Promise<HarnessAgentHandle>
 }
 
@@ -79,6 +94,14 @@ export interface HarnessAgentHostOptions {
    * leaves every turn on the session's own route.
    */
   readonly installSelection?: (agentCtx: AgentContextLike, selection: MutableSelection) => void
+  /**
+   * The preset roster, where the deployment composes one. Absent is a real
+   * deployment shape — the harness's own agent factory handles it too — and
+   * means the agent gets whatever the host composition registered globally.
+   */
+  readonly presets?: AgentPresetsLike
+  /** Preset to compose Telegram agents from; absent takes the roster default. */
+  readonly presetId?: () => string | undefined
   readonly logger?: Logger
 }
 
@@ -129,26 +152,46 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
     return wrap(handle.agent, sessionId)
   }
 
-  /** A fresh selection plus the setup that installs it, for one new agent. */
-  const prepareSelection = () => {
+  /**
+   * Everything one new agent needs composed into it.
+   *
+   * The preset is resolved here, before the agent exists, so a bad id fails
+   * the creation rather than half-composing a session. The mount itself must
+   * happen inside `setup`, which is the one place the agent is still
+   * unpublished and a rejected composition can roll the whole thing back.
+   */
+  const prepareAgent = async () => {
     const selection: MutableSelection = { current: undefined }
     const install = options.installSelection
+
+    let preset: string | undefined
+    if (options.presets) {
+      try {
+        preset = (await options.presets.resolve(options.presetId?.())).id
+      } catch (error) {
+        // A named preset that has gone is not worth failing a message over;
+        // the roster's own default still composes a usable agent.
+        options.logger?.warn('[dsh-telegram] could not resolve the agent preset', error)
+        preset = (await options.presets.resolve().catch(() => undefined))?.id
+      }
+    }
+
+    // The braces matter. The harness calls `.commit()` on whatever setup
+    // returns, so handing back the installer's disposer — as an
+    // expression-bodied arrow would — crashes agent creation on a function
+    // that has no such method. An async body resolving to undefined is fine.
+    //
+    // Dropping the disposer is right anyway: the listeners live on the
+    // agent's own scope and unwind when the agent does.
+    const setup = async (agentCtx: unknown): Promise<void> => {
+      if (install) install(agentCtx as AgentContextLike, selection)
+      if (options.presets) await options.presets.mount(agentCtx, preset)
+    }
+
     return {
       selection,
-      ...(install
-        ? {
-            setup: (agentCtx: unknown) => {
-              // The braces matter. The harness calls `.commit()` on whatever
-              // setup returns, so handing back the installer's disposer — as
-              // an expression-bodied arrow would — crashes agent creation on
-              // a function that has no such method.
-              //
-              // Dropping the disposer is right anyway: the listeners live on
-              // the agent's own scope and unwind when the agent does.
-              install(agentCtx as AgentContextLike, selection)
-            },
-          }
-        : {}),
+      ...(install || options.presets ? { setup } : {}),
+      ...(preset === undefined ? {} : { preset }),
     }
   }
 
@@ -165,10 +208,12 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
       // A forced route comes from a caller that knows which model it needs —
       // reading an image — and outranks the deployment's default.
       const route = forced ?? options.selectModel?.()
-      const prepared = prepareSelection()
+      const prepared = await prepareAgent()
       const handle = await options.agents.create({
         sessionId,
-        meta: { cwd },
+        // Recorded so a later reader — a cold transcript, the web UI's session
+        // list — resolves the same composition this agent runs on.
+        meta: { cwd, ...(prepared.preset === undefined ? {} : { agentPreset: prepared.preset }) },
         ...(route ? { agentOptions: route } : {}),
         ...(prepared.setup ? { setup: prepared.setup } : {}),
       })
@@ -181,7 +226,7 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
         // log that already names a selection keeps it, and one that does not
         // — such as a session created before this route existed — is repaired.
         const route = options.selectModel?.()
-        const prepared = prepareSelection()
+        const prepared = await prepareAgent()
         const handle = await options.agents.resume({
           resumeSessionId: sessionId,
           ...(route ? { agentOptions: route } : {}),

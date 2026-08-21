@@ -43,6 +43,7 @@ import { WorkspaceStore, resolveDirectory } from './session/workspaces.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
+import type { AgentPresetsLike } from './harness/host.js'
 import { TypingIndicator } from './telegram/typing.js'
 import { VisionExtractor } from './media/extractor.js'
 import { MediaCollector } from './media/collect.js'
@@ -282,11 +283,25 @@ async function start(
     logger,
   })
 
+  // Without this the agent joins no preset, and almost every model-facing tool
+  // — bash, the editor, grep, skills, subagents — is registered into a
+  // preset's scope layer rather than the host's. A Telegram agent then reached
+  // the model with only the globally registered web tools, and answered "I
+  // cannot run shell commands from this session".
+  const presets = ctx.get('agentPresets') as AgentPresetsLike | undefined
+  if (!presets) {
+    logger.info('[dsh-telegram] no agent preset roster; using the host composition alone')
+  }
+
   const host = createAgentHost({
     agents: ctx.agents,
     message: buildUserMessage,
     selectModel: () => selectModel(ctx, logger),
     installSelection: installModelSelection,
+    ...(presets ? { presets } : {}),
+    // Read late, so a preset chosen in the settings document reaches the next
+    // conversation rather than the next restart.
+    presetId: () => config.agentPreset || undefined,
     logger,
   })
 

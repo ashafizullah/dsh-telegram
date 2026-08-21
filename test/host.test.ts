@@ -31,17 +31,22 @@ function fakeRegistry() {
 
   const registry: AgentRegistryLike = {
     get: (sessionId) => bare.get(sessionId),
-    async create({ sessionId, agentOptions }) {
+    async create({ sessionId, agentOptions, setup }) {
       routes.push(agentOptions)
+      // Driven as the harness drives it: setup runs while the agent is still
+      // unpublished, and is awaited. Without this every test here would pass
+      // over a setup that never ran.
+      await setup?.({ on: () => () => undefined })
       const agent = make(sessionId)
       return {
         agent,
         dispose: async () => void disposed.push(sessionId),
       }
     },
-    async resume({ resumeSessionId, agentOptions }) {
+    async resume({ resumeSessionId, agentOptions, setup }) {
       routes.push(agentOptions)
       if (resumeFails) throw new Error('session log is gone')
+      await setup?.({ on: () => () => undefined })
       const agent = make(resumeSessionId)
       return {
         agent,
@@ -283,6 +288,112 @@ describe('sameRoute', () => {
   })
 })
 
+describe('createAgentHost — the agent preset', () => {
+  /** A roster recording every mount, as the harness's own factory drives it. */
+  function roster(options: { unknownId?: boolean } = {}) {
+    const mounted: (string | undefined)[] = []
+    const presets = {
+      async resolve(id?: string) {
+        if (options.unknownId && id !== undefined) throw new Error(`no preset "${id}"`)
+        return { id: id ?? 'standard' }
+      },
+      async mount(_agentCtx: unknown, id?: string) {
+        mounted.push(id)
+        return undefined
+      },
+    }
+    return { presets, mounted }
+  }
+
+  it('mounts a preset, without which the agent reaches the model with no tools', async () => {
+    // Almost every model-facing row — bash, the editor, grep, skills,
+    // subagents — is registered into a PRESET's scope layer, not the host's.
+    // An agent that joins none gets only what the host registered globally,
+    // which is how a Telegram session came to answer with web search alone.
+    const fake = fakeRegistry()
+    const rosterFake = roster()
+
+    await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      presets: rosterFake.presets,
+    }).create('s1', '/work')
+
+    expect(rosterFake.mounted).toEqual(['standard'])
+  })
+
+  it('mounts one on resume too, so a conversation keeps its tools', async () => {
+    const fake = fakeRegistry()
+    const rosterFake = roster()
+
+    await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      presets: rosterFake.presets,
+    }).resume('s1')
+
+    expect(rosterFake.mounted).toEqual(['standard'])
+  })
+
+  it('records the preset in the session header, for whoever reads it later', async () => {
+    const fake = fakeRegistry()
+    const create = vi.spyOn(fake.registry, 'create')
+
+    await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      presets: roster().presets,
+    }).create('s1', '/work')
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({ meta: { cwd: '/work', agentPreset: 'standard' } }),
+    )
+  })
+
+  it('takes the configured preset over the roster default', async () => {
+    const fake = fakeRegistry()
+    const rosterFake = roster()
+
+    await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      presets: rosterFake.presets,
+      presetId: () => 'minimal',
+    }).create('s1', '/work')
+
+    expect(rosterFake.mounted).toEqual(['minimal'])
+  })
+
+  it('falls back to the default when the configured preset has gone', async () => {
+    // A preset deleted from disk should not cost the user their message.
+    const fake = fakeRegistry()
+    const rosterFake = roster({ unknownId: true })
+
+    await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      presets: rosterFake.presets,
+      presetId: () => 'deleted',
+    }).create('s1', '/work')
+
+    expect(rosterFake.mounted).toEqual(['standard'])
+  })
+
+  it('creates an agent at all where the deployment composes no roster', async () => {
+    // A rosterless deployment is a real shape; the harness handles it too.
+    const fake = fakeRegistry()
+    const create = vi.spyOn(fake.registry, 'create')
+
+    const agent = await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+    }).create('s1', '/work')
+
+    expect(agent.sessionId).toBe('s1')
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ meta: { cwd: '/work' } }))
+  })
+})
+
 describe('createAgentHost — the setup handed to the harness', () => {
   /** A registry that treats setup exactly as the harness does. */
   function harnessLike() {
@@ -290,8 +401,9 @@ describe('createAgentHost — the setup handed to the harness', () => {
     const registry: AgentRegistryLike = {
       get: () => undefined,
       async create({ sessionId, setup }) {
-        // The harness calls `.commit()` on whatever setup returns.
-        const returned = (setup as ((ctx: unknown) => unknown) | undefined)?.({
+        // The harness AWAITS setup and calls `.commit()` on what it resolves
+        // to, so a setup that mounts a preset is asynchronous by nature.
+        const returned = await (setup as ((ctx: unknown) => unknown) | undefined)?.({
           on: () => () => undefined,
         })
         setups.push(returned)
@@ -299,7 +411,7 @@ describe('createAgentHost — the setup handed to the harness', () => {
         return { agent: { id: sessionId, followup: () => undefined, cancel: () => undefined }, dispose: async () => undefined }
       },
       async resume({ resumeSessionId, setup }) {
-        const returned = (setup as ((ctx: unknown) => unknown) | undefined)?.({
+        const returned = await (setup as ((ctx: unknown) => unknown) | undefined)?.({
           on: () => () => undefined,
         })
         setups.push(returned)

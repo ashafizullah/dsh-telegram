@@ -111,6 +111,14 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | `/stop` | 取消 Agent 当前正在做的事 |
 | `/whoami` | 你的 Telegram 用户 ID |
 
+### Agent 有哪些工具
+
+工具由 preset 提供。注册表本身属于 host 平面，但几乎每一个面向模型的行——bash、
+编辑器、grep、skills、子代理、todo、计划模式——都注册在某个 **preset** 的 scope
+层里。因此没有加入任何 preset 的 agent，到达模型时只带着 host 组合中全局注册的那
+些。Telegram 会话按部署的默认 preset 组合，或在指定了 `agentPreset` 时按它组合，
+并把该选择记入会话头，好让之后的读取者解析到同一套组合。
+
 ### Agent 在哪里工作
 
 `/cd` 不带参数会告诉你当前对话在哪；`/cd ~/projects/app` 则把它移过去。绝对路径、
@@ -215,6 +223,7 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 | `baseUrl` | `https://api.telegram.org` | Bot API 源站；仅在使用代理时修改 |
 | `allowFrom` | `[]` | 允许的用户 ID；留空则启用认领流程 |
 | `cwd` | harness 的 cwd | 对话的起始目录，直到用 `/cd` 切换 |
+| `agentPreset` | `""` | Telegram 对话所用的 preset；留空则取部署默认值。工具正是由 preset 提供 |
 | `streaming.enabled` | `true` | 边生成边显示回答 |
 | `streaming.throttleMs` | `1200` | 两帧之间的最小间隔 |
 | `streaming.placeholder` | `…` | 在有正文之前，工具行下方显示的内容 |
@@ -310,7 +319,7 @@ Telegram 只在草稿中接受该块，别处一概不接受，这与它的生�
 
 ```bash
 pnpm install
-pnpm test          # 592 个测试
+pnpm test          # 598 个测试
 pnpm test -- --coverage
 pnpm typecheck     # host 与 browser 两半
 pnpm build         # host 用 tsc，浏览器包用 esbuild

@@ -122,6 +122,16 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/stop` | Batalkan apa pun yang sedang dikerjakan agent |
 | `/whoami` | User ID Telegram-mu |
 
+### Tool apa saja yang dipunya agent
+
+Yang menyediakannya adalah preset. Registry-nya memang milik host, tapi hampir
+semua baris yang menghadap model — bash, editor, grep, skills, subagent, todo,
+plan mode — didaftarkan ke lapisan scope milik *preset*. Jadi agent yang tidak
+bergabung ke preset mana pun sampai ke model cuma dengan apa yang didaftarkan
+host secara global. Sesi Telegram dikomposisi dari preset default deployment,
+atau dari `agentPreset` kalau kamu menyebutkan satu, dan pilihannya dicatat di
+header sesi supaya pembaca berikutnya mendapat komposisi yang sama.
+
 ### Di mana agent bekerja
 
 `/cd` tanpa apa-apa memberitahu percakapanmu ada di mana; `/cd ~/projects/app`
@@ -259,6 +269,7 @@ masalah.
 | `baseUrl` | `https://api.telegram.org` | Origin Bot API; ubah hanya untuk proxy |
 | `allowFrom` | `[]` | User ID yang diizinkan; kosong mengaktifkan alur klaim |
 | `cwd` | cwd harness | Direktori awal percakapan, sampai dipindah dengan `/cd` |
+| `agentPreset` | `""` | Preset yang dipakai percakapan Telegram; kosong ikut bawaan deployment. Preset inilah yang menyediakan tool-nya |
 | `streaming.enabled` | `true` | Tampilkan jawaban sambil ditulis |
 | `streaming.throttleMs` | `1200` | Jeda minimum antar frame stream |
 | `streaming.placeholder` | `…` | Isi yang ditampilkan di bawah baris tool sebelum teks pertama tiba |
@@ -371,7 +382,7 @@ membaca transkrip.
 
 ```bash
 pnpm install
-pnpm test          # 592 test
+pnpm test          # 598 test
 pnpm test -- --coverage
 pnpm typecheck     # sisi host dan sisi browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser

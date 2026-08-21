@@ -76,6 +76,14 @@ export const Config = Schema.object({
       ),
   }),
 
+  agentPreset: Schema.string()
+    .default('')
+    .description(
+      'Agent preset Telegram conversations are composed from — the roster in ' +
+        'Settings owns the list. Empty takes the deployment default. The preset ' +
+        'is what supplies the tools, so this decides what the agent can do.',
+    ),
+
   reconnect: Schema.object({
     baseDelayMs: Schema.natural().default(1000).description('First reconnect delay.'),
     maxDelayMs: Schema.natural().default(30_000).description('Longest reconnect delay.'),

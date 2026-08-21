@@ -115,6 +115,16 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/stop` | Cancel whatever the agent is doing right now |
 | `/whoami` | Your Telegram user id |
 
+### Which tools the agent has
+
+A preset supplies them. The registries are host-plane, but almost every
+model-facing row — bash, the editor, grep, skills, subagents, todo, plan mode —
+is registered into a *preset's* scope layer, so an agent that joins no preset
+reaches the model with only whatever the host composition registered globally.
+Telegram sessions are composed from the deployment's default preset, or from
+`agentPreset` when one is named, and the choice is recorded in the session
+header so a later reader resolves the same composition.
+
 ### Where the agent works
 
 `/cd` on its own says where the conversation is; `/cd ~/projects/app` moves it.
@@ -242,6 +252,7 @@ Every field has a working default; an empty config runs.
 | `baseUrl` | `https://api.telegram.org` | Bot API origin; change only for a proxy |
 | `allowFrom` | `[]` | User ids allowed in; empty enables the claim flow |
 | `cwd` | harness cwd | Directory a conversation starts in until `/cd` moves it |
+| `agentPreset` | `""` | Preset Telegram conversations are composed from; empty takes the deployment default. The preset supplies the tools |
 | `streaming.enabled` | `true` | Show the answer as it is written |
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
 | `streaming.placeholder` | `…` | Body shown under a tool-activity line before any text arrives |
@@ -352,7 +363,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 592 tests
+pnpm test          # 598 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle
