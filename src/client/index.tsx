@@ -17,7 +17,7 @@ import type { LocaleKey } from './locale.js'
 import type { ClientContext } from './types.js'
 
 /** Cordis plugin name, as the browser loader reports it. */
-export const name = 'dsh-telegram'
+export const name = '@ashafizullah/dsh-telegram'
 
 /**
  * Cordis SERVICES this half reads as properties — not packages.

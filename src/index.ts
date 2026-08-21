@@ -60,8 +60,8 @@ import type { TelegramConfig } from './config.js'
 export { Config }
 export type { TelegramConfig }
 
-/** Cordis plugin name. */
-export const name = 'dsh-telegram'
+/** Cordis plugin name; the package name, which is also the module id. */
+export const name = '@ashafizullah/dsh-telegram'
 
 /**
  * Settings namespace this plugin owns. The browser half binds the same string,
@@ -567,7 +567,12 @@ function sameJson(a: unknown, b: unknown): boolean {
   return keys.every((key) => Object.hasOwn(right, key) && sameJson(left[key], right[key]))
 }
 
-/** Where this plugin keeps its bindings and ownership record. */
+/**
+ * Where this plugin keeps its bindings and ownership record.
+ *
+ * Deliberately not derived from the package name: renaming the package must
+ * not orphan a bot's ownership record or the conversations bound to it.
+ */
 function dataDirectory(): string {
   const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   return join(home, 'dsh-telegram')

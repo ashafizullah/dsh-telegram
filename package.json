@@ -1,5 +1,5 @@
 {
-  "name": "dsh-telegram",
+  "name": "@ashafizullah/dsh-telegram",
   "version": "0.1.0",
   "description": "Telegram channel for DeepSeek Harness \u2014 real Telegram markdown, and answer the agent's questions and approvals straight from chat",
   "type": "module",
@@ -86,5 +86,8 @@
     "telegram-bot",
     "agent",
     "chatops"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

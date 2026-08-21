@@ -35,6 +35,12 @@
 ## 安装
 
 ```bash
+npx @deepseek-ai/dsh plugin --profile web add -w @ashafizullah/dsh-telegram
+```
+
+或者从源码检出，以便在其之上开发：
+
+```bash
 git clone https://github.com/ashafizullah/dsh-telegram.git
 cd dsh-telegram
 pnpm install && pnpm build

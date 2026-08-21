@@ -26,7 +26,7 @@ describe('client bundle — registration envelope', () => {
   })
 
   it('registers under the package name, which is how the shell resolves it', () => {
-    expect(bundle).toContain('id: "dsh-telegram"')
+    expect(bundle).toContain('id: "@ashafizullah/dsh-telegram"')
   })
 
   it('exposes the factory a require, so materialization stays lazy', () => {
@@ -203,7 +203,7 @@ describe('client bundle — service injection', () => {
   })
 
   it('declares a plugin name, as the loader reports it', () => {
-    expect((materializeModule() as { name?: string }).name).toBe('dsh-telegram')
+    expect((materializeModule() as { name?: string }).name).toBe('@ashafizullah/dsh-telegram')
   })
 
   it('does not over-declare services it never reads', () => {

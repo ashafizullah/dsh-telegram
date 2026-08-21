@@ -8,7 +8,7 @@
 # provides neither user-questions nor approvals.
 - insert:
     - id: telegram
-      name: 'dsh-telegram'
+      name: '@ashafizullah/dsh-telegram'
       inject:
         - agents
         - credentials

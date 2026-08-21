@@ -40,6 +40,12 @@ bukan ditolak — jadi frame di tengah stream tidak membutuhkannya.
 ## Pemasangan
 
 ```bash
+npx @deepseek-ai/dsh plugin --profile web add -w @ashafizullah/dsh-telegram
+```
+
+Atau dari checkout, kalau mau ikut mengembangkannya:
+
+```bash
 git clone https://github.com/ashafizullah/dsh-telegram.git
 cd dsh-telegram
 pnpm install && pnpm build

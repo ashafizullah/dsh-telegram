@@ -40,6 +40,12 @@ rejected — so a mid-stream frame does not need one.
 ## Install
 
 ```bash
+npx @deepseek-ai/dsh plugin --profile web add -w @ashafizullah/dsh-telegram
+```
+
+Or from a checkout, to develop against it:
+
+```bash
 git clone https://github.com/ashafizullah/dsh-telegram.git
 cd dsh-telegram
 pnpm install && pnpm build
