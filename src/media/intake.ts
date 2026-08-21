@@ -18,6 +18,7 @@
  */
 
 import type { TelegramMessage } from '../telegram/types.js'
+import type { ImageCandidate } from './limits.js'
 
 /** Media types the harness attachment seam accepts. */
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
@@ -56,6 +57,14 @@ export interface MediaItem {
   readonly size?: number
   /** For `unsupported`, what it was — so the refusal can name it. */
   readonly describedAs?: string
+  /**
+   * Every size this image is available in, for `image` items.
+   *
+   * Telegram renders a photo at several sizes and the largest routinely
+   * exceeds what the harness will store, so the choice is made against the
+   * seam's limits rather than here. A document arrives at one size only.
+   */
+  readonly candidates?: readonly ImageCandidate[]
 }
 
 /**
@@ -66,26 +75,42 @@ export interface MediaItem {
  */
 export function describeMedia(message: TelegramMessage): MediaItem | undefined {
   if (message.photo && message.photo.length > 0) {
-    // Telegram sends several sizes; the last is the largest, and the largest
-    // is the one worth showing a model.
-    const largest = message.photo[message.photo.length - 1]
+    // Every size is kept. The largest used to be taken outright, which is why
+    // any full-height phone screenshot was refused: its long side is over the
+    // seam's 2000-pixel limit, and a smaller rendering of the same photo was
+    // sitting right there in the same message.
+    const candidates = message.photo.map((size) => ({
+      fileId: size.file_id,
+      ...(size.width !== undefined ? { width: size.width } : {}),
+      ...(size.height !== undefined ? { height: size.height } : {}),
+      ...(size.file_size !== undefined ? { size: size.file_size } : {}),
+    }))
+
+    const largest = candidates[candidates.length - 1]
     if (!largest) return undefined
+
     return {
-      fileId: largest.file_id,
+      fileId: largest.fileId,
       kind: 'image',
       mediaType: 'image/jpeg',
-      ...(largest.file_size !== undefined ? { size: largest.file_size } : {}),
+      ...(largest.size !== undefined ? { size: largest.size } : {}),
+      candidates,
     }
   }
 
   if (message.document) {
     const { file_id: fileId, file_name: name, mime_type: mediaType } = message.document
+    const kind = documentKind(mediaType, name)
     return {
       fileId,
-      kind: documentKind(mediaType, name),
+      kind,
       ...(mediaType !== undefined ? { mediaType } : {}),
       ...(name !== undefined ? { name } : {}),
       describedAs: mediaType ?? 'file',
+      // One size only: Telegram renders nothing for a file sent uncompressed,
+      // which is exactly why sending a screenshot that way can fail where
+      // sending it as a photo succeeds.
+      ...(kind === 'image' ? { candidates: [{ fileId }] } : {}),
     }
   }
 

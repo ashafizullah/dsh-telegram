@@ -13,6 +13,8 @@ import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
 
 import { describeMedia, isStorableImage } from './intake.js'
+import { describeSize, isTooLarge, orderBySuitability } from './limits.js'
+import type { ImageCandidate, ImageLimits } from './limits.js'
 import type { VisionCheck } from './vision.js'
 
 /** A durable image reference, as the harness attachment seam returns it. */
@@ -39,6 +41,14 @@ export interface MediaSource {
 /** The harness attachment seam, narrowed to what this needs. */
 export interface AttachmentStore {
   saveImage(input: { data: Uint8Array; mediaType: string; name?: string }): Promise<ImageRef>
+  /**
+   * The seam's own limits, where it publishes them.
+   *
+   * Read rather than configured a second time: the operator sets this on the
+   * attachment plugin, and a copy on this side would silently drift out of
+   * step with the number that actually decides.
+   */
+  readonly imageLimits?: ImageLimits
 }
 
 /** What a message's attachments became, plus anything the user should be told. */
@@ -112,9 +122,8 @@ export class MediaCollector {
     }
 
     try {
-      const bytes = await this.download(item.fileId)
-
       if (item.kind === 'text') {
+        const bytes = await this.download(item.fileId)
         const text = decodeText(bytes, this.options.maxTextChars)
         const name = item.name ?? 'attachment'
         return {
@@ -140,16 +149,26 @@ export class MediaCollector {
         )
       }
 
-      const attachment = await this.options.attachments.saveImage({
-        data: bytes,
-        mediaType: item.mediaType as string,
-        ...(item.name !== undefined ? { name: item.name } : {}),
-      })
+      const stored = await this.storeImage(item)
+      if (!stored) {
+        // Reached only when every size Telegram offered was still refused,
+        // which in practice means a file sent uncompressed: there is one size
+        // and it is the full-resolution original.
+        const limits = this.options.attachments.imageLimits
+        const explanation =
+          describeSize(largest(item.candidates), limits) ??
+          'That image is larger than this harness stores.'
+        return this.declined(
+          said,
+          'an image too large for this harness to store, so it was left out',
+          `${explanation} Sending it as a photo rather than as a file lets Telegram offer a smaller copy.`,
+        )
+      }
 
       // Text first: it is what the user asked, and the image is its subject.
       const parts: PromptPart[] = []
       if (said) parts.push({ type: 'text', text: said })
-      parts.push({ type: 'image', attachment })
+      parts.push({ type: 'image', attachment: stored })
       return { parts }
     } catch (error) {
       this.logger.warn('[dsh-telegram] could not read an attachment', error)
@@ -160,6 +179,51 @@ export class MediaCollector {
         `That file could not be read: ${reason}`,
       )
     }
+  }
+
+  /**
+   * Store an image, stepping down through Telegram's smaller renderings.
+   *
+   * The seam refuses anything over its per-side limit, and the largest size of
+   * a phone screenshot is always over it — 1179×2556 against a limit of 2000.
+   * The largest size that fits is tried first, and a rejection falls through
+   * to the next, because the limit belongs to the harness and may not be the
+   * number read here.
+   *
+   * @returns the stored reference, or undefined when no size was accepted.
+   */
+  private async storeImage(item: {
+    fileId: string
+    mediaType?: string
+    name?: string
+    candidates?: readonly ImageCandidate[]
+  }): Promise<ImageRef | undefined> {
+    const store = this.options.attachments
+    if (!store) return undefined
+
+    const candidates = item.candidates ?? [{ fileId: item.fileId }]
+    const ordered = orderBySuitability(candidates, store.imageLimits)
+
+    for (const candidate of ordered) {
+      try {
+        const bytes = await this.download(candidate.fileId)
+        return await store.saveImage({
+          data: bytes,
+          mediaType: item.mediaType as string,
+          ...(item.name !== undefined ? { name: item.name } : {}),
+        })
+      } catch (error) {
+        // Only a size refusal is worth another download; a malformed file or a
+        // failed write would fail identically however small the image was.
+        if (!isTooLarge(error)) throw error
+        this.logger.debug('[dsh-telegram] image refused as too large; trying a smaller size', error)
+      }
+    }
+
+    // Exhausted rather than thrown: the seam's own wording — "Image exceeds
+    // the configured per-side pixel limit" — tells the user nothing they can
+    // act on, and the caller has something better to say.
+    return undefined
   }
 
   /**
@@ -203,6 +267,16 @@ export class MediaCollector {
     }
     return await this.options.source.downloadFile(file.file_path)
   }
+}
+
+/** The biggest size offered, for a refusal that can name what was sent. */
+function largest(candidates: readonly ImageCandidate[] | undefined): ImageCandidate | undefined {
+  if (!candidates || candidates.length === 0) return undefined
+  return candidates.reduce((biggest, candidate) =>
+    (candidate.width ?? 0) * (candidate.height ?? 0) > (biggest.width ?? 0) * (biggest.height ?? 0)
+      ? candidate
+      : biggest,
+  )
 }
 
 /** Keep what the user said, and add why their file did not come through. */

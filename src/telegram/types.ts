@@ -51,7 +51,16 @@ export interface TelegramMessage {
   readonly caption?: string
   readonly message_thread_id?: number
   readonly reply_to_message?: { readonly message_id: number }
-  readonly photo?: readonly { readonly file_id: string; readonly file_size?: number }[]
+  /**
+   * Every size Telegram generated, smallest first. The dimensions matter: the
+   * largest is routinely bigger than the harness will store.
+   */
+  readonly photo?: readonly {
+    readonly file_id: string
+    readonly file_size?: number
+    readonly width?: number
+    readonly height?: number
+  }[]
   readonly document?: {
     readonly file_id: string
     readonly file_name?: string

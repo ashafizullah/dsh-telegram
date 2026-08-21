@@ -129,6 +129,16 @@ Images go through the harness attachment seam, which accepts PNG, JPEG, WebP
 and GIF. Everything else it explicitly defers, so this plugin says so rather
 than accepting the message and quietly dropping what it carried.
 
+The seam also refuses an image whose longest side is over `maxImageDimension`,
+2000 pixels by default — and every full-height phone screenshot is over it:
+1179×2556 on an iPhone, 1080×2400 on most Android. Telegram sends a photo at
+several rendered sizes, so the largest one that fits is chosen rather than the
+largest one there is, and the seam's published limits are read from the store
+itself so there is no second copy of the number to drift. If the seam refuses a
+size anyway, the next smaller one is tried; when a photo sent uncompressed
+leaves nothing to step down to, the refusal names the limit and says that
+sending it as a photo would let Telegram offer a smaller copy.
+
 A file that is too large, or that fails to download, becomes a note in the
 prompt explaining why — your caption still reaches the agent either way.
 
@@ -307,7 +317,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 522 tests
+pnpm test          # 549 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

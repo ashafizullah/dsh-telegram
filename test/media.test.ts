@@ -85,17 +85,40 @@ describe('isStorableImage', () => {
   })
 })
 
+/** The refusal the harness seam throws for an oversized image. */
+class TooLarge extends Error {
+  readonly code = 'IMAGE_DIMENSION_TOO_LARGE'
+  constructor() {
+    super('Image exceeds the configured per-side pixel limit.')
+  }
+}
+
 /** A collector over a stub Telegram and a stub attachment seam. */
-function build(options: { bytes?: Uint8Array; noStore?: boolean; failDownload?: boolean } = {}) {
+function build(
+  options: {
+    bytes?: Uint8Array
+    noStore?: boolean
+    failDownload?: boolean
+    /** Published limits, as the local attachment store exposes them. */
+    imageLimits?: { maxImageDimension?: number; maxImagePixels?: number }
+    /** File ids the seam refuses as too large, whatever their real size. */
+    refuse?: string[]
+  } = {},
+) {
   const saved: { mediaType: string; name?: string }[] = []
+  /** Every file id downloaded, in order — what was tried and in what order. */
+  const fetched: string[] = []
+  let downloading: string | undefined
 
   const collector = new MediaCollector({
     source: {
-      async getFile() {
-        return { file_path: 'photos/file.jpg', file_size: 1000 }
+      async getFile(fileId: string) {
+        downloading = fileId
+        return { file_path: `photos/${fileId}.jpg`, file_size: 1000 }
       },
       async downloadFile() {
         if (options.failDownload) throw new Error('connection reset')
+        fetched.push(downloading as string)
         return options.bytes ?? new Uint8Array([1, 2, 3])
       },
     },
@@ -103,7 +126,9 @@ function build(options: { bytes?: Uint8Array; noStore?: boolean; failDownload?: 
       ? {}
       : {
           attachments: {
+            ...(options.imageLimits ? { imageLimits: options.imageLimits } : {}),
             async saveImage(input) {
+              if (options.refuse?.includes(fetched[fetched.length - 1] as string)) throw new TooLarge()
               saved.push({ mediaType: input.mediaType, ...(input.name ? { name: input.name } : {}) })
               return {
                 attachmentId: 'a1',
@@ -119,8 +144,88 @@ function build(options: { bytes?: Uint8Array; noStore?: boolean; failDownload?: 
     maxTextChars: 100,
   })
 
-  return { collector, saved }
+  return { collector, saved, fetched }
 }
+
+/** The sizes Telegram renders for a full-height portrait screenshot. */
+const SCREENSHOT = [
+  { file_id: 'tiny', width: 90, height: 195 },
+  { file_id: 'small', width: 320, height: 694 },
+  { file_id: 'medium', width: 800, height: 1735 },
+  { file_id: 'original', width: 1179, height: 2556, file_size: 900 },
+]
+
+const LIMITS = { maxImageDimension: 2000, maxImagePixels: 40_000_000 }
+
+describe('MediaCollector — a photo bigger than the harness stores', () => {
+  it('sends the largest size that fits, not the largest size', async () => {
+    // The bug: a portrait screenshot is 2556 tall against a 2000 limit, so
+    // taking the biggest rendering refused every phone screenshot ever sent.
+    const { collector, fetched, saved } = build({ imageLimits: LIMITS })
+    const { parts } = await collector.collect(message({ photo: SCREENSHOT }), 'how much?')
+
+    expect(fetched).toEqual(['medium'])
+    expect(saved).toHaveLength(1)
+    expect(parts.map((part) => part.type)).toEqual(['text', 'image'])
+  })
+
+  it('never downloads the oversized original at all', async () => {
+    const { collector, fetched } = build({ imageLimits: LIMITS })
+    await collector.collect(message({ photo: SCREENSHOT }), undefined)
+
+    expect(fetched).not.toContain('original')
+  })
+
+  it('steps down when the seam refuses a size this side thought would fit', async () => {
+    // The limit is the harness's to change, so its refusal outranks the number
+    // read here rather than ending the attempt.
+    const { collector, fetched, saved } = build({ imageLimits: LIMITS, refuse: ['medium'] })
+    await collector.collect(message({ photo: SCREENSHOT }), undefined)
+
+    expect(fetched).toEqual(['medium', 'small'])
+    expect(saved).toHaveLength(1)
+  })
+
+  it('explains it in words the user can act on when every size is refused', async () => {
+    // The seam's own wording — "Image exceeds the configured per-side pixel
+    // limit" — is what the user saw, and it told them nothing to do about it.
+    const { collector } = build({
+      imageLimits: LIMITS,
+      refuse: ['tiny', 'small', 'medium', 'original'],
+    })
+    const { parts, notice } = await collector.collect(message({ photo: SCREENSHOT }), 'how much?')
+
+    expect(notice).toContain('2000')
+    expect(notice).toContain('as a photo')
+    expect((parts[0] as { text: string }).text).toContain('how much?')
+  })
+
+  it('keeps trying a size that is not measured rather than refusing outright', async () => {
+    // An image sent as a file has one size and no dimensions; blind is still
+    // better than declining something that may well be fine.
+    const { collector, saved } = build({ imageLimits: LIMITS })
+    await collector.collect(
+      message({ document: { file_id: 'f', file_name: 'shot.png', mime_type: 'image/png' } }),
+      undefined,
+    )
+
+    expect(saved).toEqual([{ mediaType: 'image/png', name: 'shot.png' }])
+  })
+
+  it('assumes the harness default where the seam publishes no limits', async () => {
+    const { collector, fetched } = build()
+    await collector.collect(message({ photo: SCREENSHOT }), undefined)
+
+    expect(fetched).toEqual(['medium'])
+  })
+
+  it('does not retry a failure another size would not fix', async () => {
+    const { collector } = build({ imageLimits: LIMITS, failDownload: true })
+    const { notice } = await collector.collect(message({ photo: SCREENSHOT }), undefined)
+
+    expect(notice).toContain('connection reset')
+  })
+})
 
 describe('MediaCollector — images', () => {
   it('stores a photo and hands the agent an image block', async () => {

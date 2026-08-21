@@ -134,6 +134,17 @@ Gambar melewati seam attachment harness, yang menerima PNG, JPEG, WebP, dan
 GIF. Sisanya secara eksplisit ditunda, jadi plugin ini mengatakannya alih-alih
 menerima pesan lalu diam-diam membuang isinya.
 
+Seam itu juga menolak gambar yang sisi terpanjangnya melebihi
+`maxImageDimension` — bawaannya 2000 piksel — dan **setiap** screenshot ponsel
+setinggi layar melewatinya: 1179×2556 di iPhone, 1080×2400 di kebanyakan
+Android. Telegram mengirim satu foto dalam beberapa ukuran, jadi yang dipilih
+adalah ukuran terbesar yang **muat**, bukan yang terbesar yang ada; limitnya
+dibaca langsung dari store-nya sendiri supaya tidak ada salinan angka yang bisa
+melenceng. Kalau seam tetap menolak, ukuran berikutnya yang dicoba. Untuk
+gambar yang dikirim sebagai berkas — hanya ada satu ukuran, tidak ada yang bisa
+diturunkan — penolakannya menyebutkan limitnya dan menyarankan mengirimnya
+sebagai foto supaya Telegram menyediakan salinan yang lebih kecil.
+
 Berkas yang terlalu besar, atau gagal diunduh, menjadi catatan di prompt yang
 menjelaskan sebabnya — caption-mu tetap sampai ke agent.
 
@@ -312,7 +323,7 @@ tahu agent masih hidup, bukan membaca transkrip.
 
 ```bash
 pnpm install
-pnpm test          # 522 test
+pnpm test          # 549 test
 pnpm test -- --coverage
 pnpm typecheck     # paruh host dan browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser

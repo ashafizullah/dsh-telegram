@@ -124,6 +124,13 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 图片经由 harness 的附件接缝，它接受 PNG、JPEG、WebP 和 GIF。其余类型被官方明确
 搁置，因此本插件会直言相告，而不是收下消息再悄悄丢掉其中的内容。
 
+该接缝还会拒绝最长边超过 `maxImageDimension`（默认 2000 像素）的图片——而**每一张**
+满屏的手机截图都超过它：iPhone 是 1179×2556，多数 Android 是 1080×2400。Telegram
+会为一张照片渲染多个尺寸，因此这里选的是**放得下**的最大尺寸，而不是现有的最大
+尺寸；限制值直接从 store 本身读取，不再另存一份会走样的数字。若接缝仍然拒绝，就
+退到下一个更小的尺寸。至于以文件形式发送的图片——只有一个尺寸，无处可退——拒绝
+信息会说明限制是多少，并提示改用照片方式发送，让 Telegram 提供较小的副本。
+
 文件过大或下载失败时，会变成提示词里的一句说明——无论如何，你的说明文字仍会到达
 Agent。
 
@@ -271,7 +278,7 @@ Telegram 只在草稿中接受该块，别处一概不接受，这与它的生�
 
 ```bash
 pnpm install
-pnpm test          # 522 个测试
+pnpm test          # 549 个测试
 pnpm test -- --coverage
 pnpm typecheck     # host 与 browser 两半
 pnpm build         # host 用 tsc，浏览器包用 esbuild
