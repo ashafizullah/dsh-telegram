@@ -62,6 +62,24 @@ describe('client bundle — externals', () => {
   })
 })
 
+/** Materialize the bundle exactly as the shell does, then read its exports. */
+function materializeWith(bundle: string): Record<string, unknown> {
+  let registered: { id: string; factory: (require: (id: string) => unknown) => unknown } | undefined
+  const loader = { load: (entry: never) => void (registered = entry) }
+
+  // eslint-disable-next-line no-new-func -- this is the shell's own execution model.
+  new Function('window', bundle)({ __ModuleLoader__: loader })
+  if (!registered) throw new Error('the bundle registered no module')
+
+  const stub = (id: string) => {
+    if (id === 'react') return { useState: () => [], useEffect: () => undefined }
+    if (id === 'react/jsx-runtime') return { jsx: () => null, jsxs: () => null, Fragment: null }
+    throw new Error(`unexpected require: ${id}`)
+  }
+
+  return registered.factory(stub) as Record<string, unknown>
+}
+
 describe('client bundle — what the factory produces', () => {
   /** Materialize the bundle exactly as the shell does, then read its exports. */
   function materialize(): { apply?: (ctx: unknown) => void } {
@@ -134,6 +152,67 @@ describe('client bundle — what the factory produces', () => {
     })
 
     expect(register).toHaveBeenCalledWith('telegram', expect.objectContaining({ 'en-US': expect.anything() }))
+  })
+})
+
+/** Module-scope materializer for the injection tests. */
+function materializeModule(): Record<string, unknown> {
+  return materializeWith(bundle)
+}
+
+describe('client bundle — service injection', () => {
+  it('names every service it reads, which is what cordis enforces', () => {
+    const module = materializeModule() as { inject?: string[] }
+    const declared = new Set(module.inject ?? [])
+
+    /**
+     * A context that refuses an undeclared service exactly the way cordis
+     * does — "cannot get property X without inject". Reproducing that rule
+     * here is the only way a stubbed test can catch a missing declaration;
+     * a permissive stub passes and the real shell fails to apply the entry.
+     */
+    const services: Record<string, unknown> = {
+      slots: { register: () => undefined, inject: (_n: string, e: () => unknown) => void e() },
+      locale: { register: () => undefined, bind: () => (key: string) => key },
+      settingsScope: {
+        bind: () => ({ getSnapshot: () => ({}), subscribe: () => () => undefined }),
+      },
+    }
+
+    // Context METHODS are always available; only services need declaring.
+    const methods: Record<string, unknown> = {
+      effect: (callback: () => void) => callback(),
+      get: () => ({ api: { credentials: {} } }),
+      on: () => () => undefined,
+    }
+
+    const ctx = new Proxy(
+      {},
+      {
+        get(_target, property: string) {
+          if (property in methods) return methods[property]
+          if (!declared.has(property)) {
+            throw new Error(`cannot get property "${property}" without inject`)
+          }
+          return services[property]
+        },
+      },
+    )
+
+    expect(() => (module as { apply?: (c: unknown) => void }).apply?.(ctx)).not.toThrow()
+  })
+
+  it('declares a plugin name, as the loader reports it', () => {
+    expect((materializeModule() as { name?: string }).name).toBe('dsh-telegram')
+  })
+
+  it('does not over-declare services it never reads', () => {
+    const declared = (materializeModule() as { inject?: string[] }).inject ?? []
+    for (const service of declared) {
+      // A declared service that is never read makes the entry wait — or fail —
+      // on something the plugin does not actually need.
+      expect(bundle).toContain(`ctx.${service}`)
+    }
   })
 })
 

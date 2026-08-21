@@ -16,6 +16,20 @@ import { locales } from './locale.js'
 import type { LocaleKey } from './locale.js'
 import type { ClientContext } from './types.js'
 
+/** Cordis plugin name, as the browser loader reports it. */
+export const name = 'dsh-telegram'
+
+/**
+ * Cordis SERVICES this half reads as properties — not packages.
+ *
+ * Every direct `ctx.<service>` access must be listed here or cordis refuses it
+ * with "cannot get property … without inject". `connection` is deliberately
+ * absent: it is reached through `ctx.get()`, which reads the store without the
+ * inject requirement, so a deployment without it degrades to a page that
+ * cannot edit the token rather than an entry that fails to apply.
+ */
+export const inject = ['slots', 'locale', 'settingsScope']
+
 /** Must match `SETTINGS_NAMESPACE` in the host half. */
 const NAMESPACE = 'telegram'
 
