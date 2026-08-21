@@ -10,15 +10,39 @@
 
 import type { ReactNode } from 'react'
 
-/** Shell theme tokens, with fallbacks for a shell that does not define them. */
+/**
+ * Shell theme tokens, with fallbacks for a shell that does not define them.
+ *
+ * The split between the two groups is load-bearing, not decorative. A `label-`
+ * token is a FOREGROUND colour: in the dark theme it resolves to something
+ * near white, so painting a surface with one produces white-on-white. Fills
+ * must come from `FILL`, which holds only tokens meant to be painted.
+ */
+
+/** Foreground colours. Safe for text and borders; never for a background. */
+const TEXT = {
+  primary: 'var(--dsw-alias-label-primary, currentColor)',
+  secondary: 'var(--dsw-alias-label-secondary, #6b7280)',
+  tertiary: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+} as const
+
+/** Surface colours. Safe to paint. */
+const FILL = {
+  /** The shell's accent, used for focus rings and selected state. */
+  brand: 'var(--dsw-alias-brand-primary, #4d6bfe)',
+  surface: 'var(--dsw-alias-bg-layer-1, transparent)',
+  /** A neutral track: a border token reads as a faint fill in both themes. */
+  neutral: 'var(--dsw-alias-border-l2, rgba(128,128,128,0.45))',
+} as const
+
 const COLOR = {
-  text: 'var(--dsw-alias-label-primary, currentColor)',
-  muted: 'var(--dsw-alias-label-secondary, #6b7280)',
-  faint: 'var(--dsw-alias-label-tertiary, #9ca3af)',
+  text: TEXT.primary,
+  muted: TEXT.secondary,
+  faint: TEXT.tertiary,
   border: 'var(--dsw-alias-border-l1, rgba(128,128,128,0.28))',
   borderStrong: 'var(--dsw-alias-border-l2, rgba(128,128,128,0.45))',
-  surface: 'var(--dsw-alias-bg-layer-1, transparent)',
-  accent: 'var(--dsw-alias-label-primary-bluish, #2563eb)',
+  surface: FILL.surface,
+  accent: FILL.brand,
   danger: 'var(--dsw-alias-state-error-primary, #dc2626)',
   success: 'var(--dsw-alias-state-success-primary, #16a34a)',
   warn: 'var(--dsw-alias-state-warn-primary, #d97706)',
@@ -183,7 +207,14 @@ export function NumberInput(props: {
   )
 }
 
-/** An on/off switch. */
+/**
+ * An on/off switch.
+ *
+ * The track always carries a real fill — brand when on, neutral when off — and
+ * the knob always carries an edge. Both matter: a transparent track leaves the
+ * knob floating over the page background, and a knob with no edge disappears
+ * into a pale track. Neither can be seen while testing one theme.
+ */
 export function Toggle(props: { checked: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
   return (
     <button
@@ -193,12 +224,15 @@ export function Toggle(props: { checked: boolean; onChange: (next: boolean) => v
       disabled={props.disabled ?? false}
       onClick={() => props.onChange(!props.checked)}
       style={{
+        boxSizing: 'border-box',
+        // border-box plus these numbers leaves a 34x16 content box, so the
+        // knob's travel below is exactly its width.
         width: 40,
         height: 22,
         padding: 2,
+        border: '1px solid transparent',
         borderRadius: 999,
-        border: `1px solid ${COLOR.borderStrong}`,
-        background: props.checked ? COLOR.accent : 'transparent',
+        background: props.checked ? FILL.brand : FILL.neutral,
         cursor: props.disabled ? 'default' : 'pointer',
         opacity: props.disabled ? 0.5 : 1,
         transition: 'background 120ms ease',
@@ -210,7 +244,10 @@ export function Toggle(props: { checked: boolean; onChange: (next: boolean) => v
           width: 16,
           height: 16,
           borderRadius: '50%',
-          background: props.checked ? '#fff' : COLOR.faint,
+          background: '#fff',
+          border: '1px solid rgba(0, 0, 0, 0.12)',
+          boxSizing: 'border-box',
+          boxShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',
           transform: props.checked ? 'translateX(18px)' : 'translateX(0)',
           transition: 'transform 120ms ease',
         }}
@@ -261,7 +298,7 @@ export function Note(props: { tone: 'info' | 'good' | 'warn' | 'bad'; children: 
   return <div style={{ fontSize: 12, lineHeight: 1.6, color }}>{props.children}</div>
 }
 
-export { COLOR }
+export { COLOR, FILL, TEXT }
 
 /** Shared style for the inline reset affordance. */
 const linkButtonStyle = {
