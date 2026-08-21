@@ -110,6 +110,10 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | `/stop` | 取消 Agent 当前正在做的事 |
 | `/whoami` | 你的 Telegram 用户 ID |
 
+每次连接时这份列表都会注册到 Telegram，所以在聊天里输入 `/` 就会看到命令提示和
+各自的说明。机器人一旦有了主人，`/claim` 就会从列表里消失——它是唯一一个成功之后
+便不再有用的命令。
+
 除此之外你输入的任何内容，都会作为提示词交给 Agent。
 
 ## 你可以发送什么
@@ -292,7 +296,7 @@ Telegram 只在草稿中接受该块，别处一概不接受，这与它的生�
 
 ```bash
 pnpm install
-pnpm test          # 549 个测试
+pnpm test          # 561 个测试
 pnpm test -- --coverage
 pnpm typecheck     # host 与 browser 两半
 pnpm build         # host 用 tsc，浏览器包用 esbuild

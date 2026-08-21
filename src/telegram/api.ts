@@ -314,6 +314,24 @@ export class TelegramApi {
     }
   }
 
+  /**
+   * Publish the command menu Telegram offers when someone types `/`.
+   *
+   * Without this the bot answers every command correctly and advertises none
+   * of them, so they are discoverable only by reading the README. Best-effort:
+   * a bot that cannot publish its menu still works, it is only harder to find
+   * your way around.
+   *
+   * @param commands - name and one-line description, in menu order.
+   */
+  async setMyCommands(commands: readonly { command: string; description: string }[]): Promise<void> {
+    try {
+      await this.call('setMyCommands', { commands })
+    } catch {
+      // Cosmetic only.
+    }
+  }
+
   /** Show a progress indicator in the chat. Best-effort by design. */
   async sendChatAction(chatId: string, action: ChatAction, threadId?: number): Promise<void> {
     try {

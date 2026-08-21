@@ -121,6 +121,11 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/stop` | Batalkan apa pun yang sedang dikerjakan agent |
 | `/whoami` | User ID Telegram-mu |
 
+Daftar ini didaftarkan ke Telegram tiap kali bot tersambung, jadi begitu kamu
+ketik `/` di chat, hint-nya langsung muncul lengkap dengan keterangannya.
+`/claim` hilang dari daftar begitu bot sudah punya pemilik — itu satu-satunya
+perintah yang justru berhenti berguna begitu berhasil dipakai.
+
 Selain itu, apa pun yang kamu ketik jadi prompt buat agent.
 
 ## Yang bisa kamu kirim
@@ -348,7 +353,7 @@ membaca transkrip.
 
 ```bash
 pnpm install
-pnpm test          # 549 test
+pnpm test          # 561 test
 pnpm test -- --coverage
 pnpm typecheck     # sisi host dan sisi browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser

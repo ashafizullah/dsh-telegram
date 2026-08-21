@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { helpText, parseCommand } from '../src/commands.js'
+import { COMMANDS, commandMenu, helpText, parseCommand } from '../src/commands.js'
 import { TextCapture } from '../src/interact/text-capture.js'
 
 describe('parseCommand', () => {
@@ -55,6 +55,56 @@ describe('helpText', () => {
     expect(help).toContain('/new')
     expect(help).toContain('/status')
     expect(help).toContain('/claim')
+  })
+
+  it('escapes the descriptions, which are prose and not markup', () => {
+    // This is what broke /help: the claim description ends in "/claim <code>",
+    // and Telegram read that as an unclosed <code> tag and refused the WHOLE
+    // message with a 400. The command answered with silence.
+    const help = helpText()
+    expect(help).toContain('&lt;code&gt;')
+    expect(help).not.toContain('<code>')
+  })
+
+  it('leaves only tags it opened and closed itself', () => {
+    // The general form of the same bug: any tag in the body that this function
+    // did not balance makes Telegram reject the message.
+    const tags = [...helpText().matchAll(/<\/?([a-z]+)[^>]*>/g)].map((match) => match[1])
+    expect(tags).toEqual(['b', 'b'])
+  })
+
+  it('stays sendable however a description is worded later', () => {
+    // Every description goes through the same escape, so a future one carrying
+    // markup cannot repeat this.
+    for (const description of Object.values(COMMANDS)) {
+      const escaped = helpText()
+      if (description.includes('<')) expect(escaped).not.toContain(description)
+    }
+  })
+})
+
+describe('commandMenu', () => {
+  it('offers every command while the bot is still unclaimed', () => {
+    const names = commandMenu(true).map((entry) => entry.command)
+    expect(names).toEqual(Object.keys(COMMANDS))
+  })
+
+  it('drops /claim once the bot has an owner', () => {
+    // It is the one command that stops working the moment it succeeds, and
+    // offering it forever invites everyone to try a code that cannot be right.
+    expect(commandMenu(false).map((entry) => entry.command)).not.toContain('claim')
+  })
+
+  it('describes each one, since the menu is the description', () => {
+    for (const entry of commandMenu(true)) {
+      expect(entry.description.length).toBeGreaterThan(0)
+      expect(entry.description.length).toBeLessThanOrEqual(256)
+    }
+  })
+
+  it('uses names Telegram accepts', () => {
+    // Telegram takes lowercase letters, digits and underscores, 1-32 chars.
+    for (const entry of commandMenu(true)) expect(entry.command).toMatch(/^[a-z0-9_]{1,32}$/)
   })
 })
 

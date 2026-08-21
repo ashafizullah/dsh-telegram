@@ -25,6 +25,8 @@ import type { AgentRunner } from '../router.js'
 import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
 
+import { escapeHtml } from '../render/escape.js'
+
 import type { BindingStore } from './bindings.js'
 
 /** Whether a prompt carries an image, which changes a conversation for good. */
@@ -220,8 +222,11 @@ export class SessionRunner implements AgentRunner {
 
     const live = this.options.host.live(binding.sessionId) !== undefined
     return [
-      `<b>Session</b> <code>${binding.sessionId}</code>`,
-      `<b>Working directory</b> <code>${this.options.cwd}</code>`,
+      // Escaped for the same reason `/help` is: an unbalanced tag makes
+      // Telegram refuse the whole message, and a working directory is a path
+      // the operator chose, not a value this plugin controls.
+      `<b>Session</b> <code>${escapeHtml(binding.sessionId)}</code>`,
+      `<b>Working directory</b> <code>${escapeHtml(this.options.cwd)}</code>`,
       `<b>State</b> ${live ? 'loaded' : 'idle (will resume on your next message)'}`,
       `<b>Since</b> ${new Date(binding.createdAt).toISOString()}`,
     ].join('\n')

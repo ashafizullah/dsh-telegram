@@ -114,6 +114,10 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/stop` | Cancel whatever the agent is doing right now |
 | `/whoami` | Your Telegram user id |
 
+They are published to Telegram on every connection, so typing `/` in the chat
+offers the list with descriptions. `/claim` drops off it once the bot has an
+owner — it is the one command that stops working the moment it succeeds.
+
 Anything else you type is a prompt for the agent.
 
 ## What you can send
@@ -330,7 +334,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 549 tests
+pnpm test          # 561 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

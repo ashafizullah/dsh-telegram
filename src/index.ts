@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { AccessPolicy } from './access.js'
+import { commandMenu } from './commands.js'
 import { StatusFile, describeError } from './diagnostics.js'
 import { SecretRegistry } from './secrets.js'
 import { Config } from './config.js'
@@ -236,6 +237,12 @@ async function start(
     claimCodeFile,
   })
   announceAccess(access, config, claimCode, claimCodeFile, me.username, logger)
+
+  // Published once per connection rather than per message: the menu is a
+  // property of the bot, not of a chat, and Telegram remembers it.
+  void api.setMyCommands(
+    commandMenu(access.owner() === undefined && config.allowFrom.length === 0),
+  )
 
   const surface = telegramSurface(api)
   const pending = new PendingRegistry<unknown>()

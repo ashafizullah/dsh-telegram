@@ -304,6 +304,26 @@ function reader(options: { available?: boolean; fails?: boolean } = {}): PromptR
   }
 }
 
+describe('SessionRunner — the status line', () => {
+  it('escapes the working directory, which the operator chose', async () => {
+    // /status puts the path inside <code>. An unbalanced tag makes Telegram
+    // refuse the whole message, which is how /help came to answer with nothing.
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwd: '/work/<repo> & co',
+      newSessionId: () => 's1',
+    })
+
+    await runner.prompt(CHAT, text('hello'))
+    const status = await runner.status(CHAT)
+
+    expect(status).toContain('/work/&lt;repo&gt; &amp; co')
+    expect(status).not.toContain('<repo>')
+  })
+})
+
 describe('SessionRunner — an image read before the conversation sees it', () => {
   it('sends the reading, not the picture', async () => {
     const fake = fakeHost()

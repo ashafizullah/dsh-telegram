@@ -7,6 +7,8 @@
  * addressed to a different bot must be ignored rather than executed.
  */
 
+import { escapeHtml } from './render/escape.js'
+
 /** A recognised command and the text that followed it. */
 export interface ParsedCommand {
   /** Command name, lowercased, without the slash or the bot suffix. */
@@ -14,6 +16,9 @@ export interface ParsedCommand {
   /** Everything after the command, trimmed; empty when there was nothing. */
   readonly args: string
 }
+
+/** Telegram refuses a menu description longer than this. */
+const MAX_MENU_DESCRIPTION = 256
 
 /** Commands the plugin answers, with the one-line help shown by `/help`. */
 export const COMMANDS: Readonly<Record<string, string>> = {
@@ -48,10 +53,38 @@ export function parseCommand(text: string, botUsername?: string): ParsedCommand 
   return { name, args: (match[3] ?? '').trim() }
 }
 
-/** The `/help` body, rendered as Telegram HTML. */
+/**
+ * The command menu to publish, for the list Telegram shows on `/`.
+ *
+ * `/claim` is left out once the bot has an owner: it is the one command that
+ * stops working the moment it succeeds, and offering it forever invites
+ * everyone who opens the chat to try a code that can no longer be right.
+ *
+ * @param claimable - whether the bot is still waiting to be claimed.
+ * @returns entries in menu order, descriptions clipped to Telegram's limit.
+ */
+export function commandMenu(claimable: boolean): { command: string; description: string }[] {
+  return Object.entries(COMMANDS)
+    .filter(([name]) => claimable || name !== 'claim')
+    .map(([command, description]) => ({
+      command,
+      description: description.slice(0, MAX_MENU_DESCRIPTION),
+    }))
+}
+
+/**
+ * The `/help` body, rendered as Telegram HTML.
+ *
+ * The descriptions are prose, not markup, so they are escaped on the way in.
+ * `/claim <code>` is the reason: sent raw with `parse_mode: HTML`, Telegram
+ * read `<code>` as an unclosed tag and rejected the WHOLE message with a 400 —
+ * so `/help` answered with silence, which reads as a dead bot rather than as a
+ * malformed message. Escaping here means a description added later cannot do
+ * it again.
+ */
 export function helpText(): string {
   const lines = Object.entries(COMMANDS).map(
-    ([name, description]) => `/${name} — ${description}`,
+    ([name, description]) => `/${name} — ${escapeHtml(description)}`,
   )
   return `<b>Commands</b>\n${lines.join('\n')}`
 }
