@@ -2,34 +2,57 @@ import { describe, expect, it } from 'vitest'
 
 import { TurnBridge } from '../src/reply/turn-bridge.js'
 import type { SessionEvent } from '../src/reply/turn-bridge.js'
-import type { ChatSurface } from '../src/interact/surface.js'
+import type { RichChat } from '../src/reply/rich-stream.js'
 
-function fakeSurface() {
+/** A Bot API stand-in recording every rich call the bridge makes. */
+function fakeChat() {
+  const drafts: { draftId: number; markdown: string }[] = []
   const sent: string[] = []
-  const edits: { messageId: number; html: string }[] = []
+  const placeholders: string[] = []
+  const edits: { messageId: number; markdown: string }[] = []
   let nextId = 0
 
-  const surface: ChatSurface = {
-    async send(_target, html) {
-      sent.push(html)
-      return (nextId += 1)
+  const chat: RichChat = {
+    async sendRichMessage(options) {
+      sent.push(options.markdown)
+      return { messageId: (nextId += 1) }
     },
-    async edit(_target, messageId, html) {
-      edits.push({ messageId, html })
+    async sendRichMessageDraft(options) {
+      drafts.push({ draftId: options.draftId, markdown: options.markdown })
+    },
+    async sendMessage(options) {
+      placeholders.push(options.html)
+      return { messageId: (nextId += 1) }
+    },
+    async editRichMessage(options) {
+      edits.push({ messageId: options.messageId, markdown: options.markdown })
+      return undefined
     },
   }
 
-  return { surface, sent, edits, latest: () => edits[edits.length - 1]?.html }
+  return {
+    chat,
+    drafts,
+    sent,
+    placeholders,
+    edits,
+    /** The newest draft frame — what the user is watching mid-turn. */
+    frame: () => drafts[drafts.length - 1]?.markdown,
+    /** The finished reply, wherever it landed. */
+    final: () => edits[edits.length - 1]?.markdown ?? sent[sent.length - 1],
+  }
 }
 
-function build(options: { bound?: boolean } = {}) {
-  const chat = fakeSurface()
+function build(options: { bound?: boolean; group?: boolean } = {}) {
+  const chat = fakeChat()
   const bridge = new TurnBridge({
-    surface: chat.surface,
+    chat: chat.chat,
     targetOf: (sessionId) =>
       options.bound === false || sessionId !== 'S' ? undefined : { chatId: '42' },
+    canDraft: () => options.group !== true,
     throttleMs: 0,
     placeholder: '…',
+    heartbeatMs: 0,
   })
   return { bridge, chat }
 }
@@ -43,28 +66,48 @@ const delta = (text: string, turn = 1): SessionEvent => ({
 })
 
 describe('TurnBridge — streaming a turn', () => {
-  it('posts a placeholder when the turn opens', async () => {
+  it('shows a placeholder draft as soon as the turn opens', async () => {
     const { bridge, chat } = build()
     await bridge.handle('S', start)
-    expect(chat.sent).toEqual(['…'])
+    expect(chat.frame()).toBe('…')
   })
 
-  it('streams text deltas into the message', async () => {
+  it('streams markdown verbatim, for Telegram to render', async () => {
     const { bridge, chat } = build()
     await bridge.handle('S', start)
     await bridge.handle('S', delta('Hello '))
     await bridge.handle('S', delta('**world**'))
 
-    expect(chat.latest()).toBe('Hello <b>world</b>')
+    expect(chat.frame()).toBe('Hello **world**')
   })
 
-  it('closes the reply when the turn ends', async () => {
+  it('keeps one draft id for the turn, so frames animate together', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', delta('a'))
+    await bridge.handle('S', delta('b'))
+
+    expect(new Set(chat.drafts.map((d) => d.draftId)).size).toBe(1)
+    expect(chat.drafts[0]?.draftId).not.toBe(0)
+  })
+
+  it('gives a later turn its own draft id, so it does not animate out of the last', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', end)
+    await bridge.handle('S', { type: 'turn/start', data: { turn: 2 } })
+
+    const ids = new Set(chat.drafts.map((d) => d.draftId))
+    expect(ids.size).toBe(2)
+  })
+
+  it('persists the reply when the turn ends, since a draft is ephemeral', async () => {
     const { bridge, chat } = build()
     await bridge.handle('S', start)
     await bridge.handle('S', delta('done'))
     await bridge.handle('S', end)
 
-    expect(chat.latest()).toBe('done')
+    expect(chat.sent).toEqual(['done'])
     expect(bridge.isStreaming('S')).toBe(false)
   })
 
@@ -78,7 +121,7 @@ describe('TurnBridge — streaming a turn', () => {
     })
     await bridge.handle('S', end)
 
-    expect(chat.latest()).toBe('the complete answer')
+    expect(chat.final()).toBe('the complete answer')
   })
 })
 
@@ -88,6 +131,7 @@ describe('TurnBridge — what it filters out', () => {
     await bridge.handle('S', start)
     await bridge.handle('S', delta('text'))
 
+    expect(chat.drafts).toHaveLength(0)
     expect(chat.sent).toHaveLength(0)
   })
 
@@ -99,7 +143,7 @@ describe('TurnBridge — what it filters out', () => {
       data: { turn: 1, chunk: { type: 'reasoning-delta', text: 'let me think' } },
     })
 
-    expect(chat.edits).toHaveLength(0)
+    expect(chat.drafts.slice(1)).toHaveLength(0)
   })
 
   it('keeps tool-call fragments out of the chat', async () => {
@@ -110,7 +154,7 @@ describe('TurnBridge — what it filters out', () => {
       data: { turn: 1, chunk: { type: 'tool-call-delta', text: '{"path":' } },
     })
 
-    expect(chat.edits).toHaveLength(0)
+    expect(chat.drafts.slice(1)).toHaveLength(0)
   })
 
   it('ignores events for a turn other than the open one', async () => {
@@ -118,20 +162,20 @@ describe('TurnBridge — what it filters out', () => {
     await bridge.handle('S', start)
     await bridge.handle('S', delta('from another turn', 9))
 
-    expect(chat.edits).toHaveLength(0)
+    expect(chat.drafts.slice(1)).toHaveLength(0)
   })
 
   it('ignores deltas with no open turn at all', async () => {
     const { bridge, chat } = build()
     await bridge.handle('S', delta('orphan'))
-    expect(chat.sent).toHaveLength(0)
+    expect(chat.drafts).toHaveLength(0)
   })
 
   it('ignores event types it does not consume', async () => {
     const { bridge, chat } = build()
     await bridge.handle('S', start)
     await bridge.handle('S', { type: 'tool/result', data: {} })
-    expect(chat.edits).toHaveLength(0)
+    expect(chat.drafts.slice(1)).toHaveLength(0)
   })
 })
 
@@ -142,7 +186,8 @@ describe('TurnBridge — lifecycle', () => {
     await bridge.handle('S', delta('first turn'))
     await bridge.handle('S', { type: 'turn/start', data: { turn: 2 } })
 
-    expect(chat.sent).toHaveLength(2)
+    // The stranded turn was persisted rather than left as an expiring draft.
+    expect(chat.sent).toEqual(['first turn'])
     expect(bridge.isStreaming('S')).toBe(true)
   })
 
@@ -153,19 +198,57 @@ describe('TurnBridge — lifecycle', () => {
     expect(bridge.isStreaming('S')).toBe(false)
   })
 
-  it('survives a surface failure without throwing at the harness', async () => {
+  it('survives a chat failure without throwing at the harness', async () => {
     const bridge = new TurnBridge({
-      surface: {
-        send: async () => {
+      chat: {
+        sendRichMessage: async () => {
           throw new Error('telegram is down')
         },
-        edit: async () => undefined,
+        sendRichMessageDraft: async () => {
+          throw new Error('telegram is down')
+        },
+        sendMessage: async () => {
+          throw new Error('telegram is down')
+        },
+        editRichMessage: async () => undefined,
       },
       targetOf: () => ({ chatId: '42' }),
+      canDraft: () => true,
       throttleMs: 0,
+      heartbeatMs: 0,
     })
 
     await expect(bridge.handle('S', start)).resolves.toBeUndefined()
     await expect(bridge.handle('S', delta('text'))).resolves.toBeUndefined()
+  })
+})
+
+
+describe('TurnBridge — groups, which have no draft api', () => {
+  it('posts a placeholder instead of a draft', async () => {
+    const { bridge, chat } = build({ group: true })
+    await bridge.handle('S', start)
+
+    expect(chat.drafts).toHaveLength(0)
+    expect(chat.placeholders).toEqual(['…'])
+  })
+
+  it('does not stream, because there is nothing to stream into', async () => {
+    const { bridge, chat } = build({ group: true })
+    await bridge.handle('S', start)
+    await bridge.handle('S', delta('working'))
+
+    expect(chat.drafts).toHaveLength(0)
+    expect(chat.edits).toHaveLength(0)
+  })
+
+  it('replaces the placeholder with the finished reply', async () => {
+    const { bridge, chat } = build({ group: true })
+    await bridge.handle('S', start)
+    await bridge.handle('S', delta('the answer'))
+    await bridge.handle('S', end)
+
+    expect(chat.edits).toHaveLength(1)
+    expect(chat.edits[0]?.markdown).toBe('the answer')
   })
 })

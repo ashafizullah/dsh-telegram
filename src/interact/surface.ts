@@ -18,10 +18,18 @@ export interface ChatTarget {
 
 /** Post and revise messages in a chat. */
 export interface ChatSurface {
-  /** Post a message; resolves to its id so it can be revised later. */
+  /**
+   * Post a message built by this plugin. HTML, because these are short,
+   * assembled from escaped text, and carry the inline keyboards.
+   */
   send(target: ChatTarget, html: string, keyboard?: InlineKeyboard): Promise<number>
   /** Revise a message in place. Passing an empty keyboard retires the buttons. */
   edit(target: ChatTarget, messageId: number, html: string, keyboard?: InlineKeyboard): Promise<void>
+  /**
+   * Post agent-authored markdown, which Telegram renders itself — the path a
+   * plan or a diff takes, so its tables and code blocks survive.
+   */
+  sendMarkdown(target: ChatTarget, markdown: string): Promise<number>
 }
 
 /** Bind a {@link ChatSurface} to the live Bot API client. */
@@ -44,6 +52,15 @@ export function telegramSurface(api: TelegramApi): ChatSurface {
         html,
         ...(keyboard ? { keyboard } : {}),
       })
+    },
+
+    async sendMarkdown(target, markdown) {
+      const sent = await api.sendRichMessage({
+        chatId: target.chatId,
+        markdown,
+        ...(target.threadId !== undefined ? { threadId: target.threadId } : {}),
+      })
+      return sent.messageId
     },
   }
 }

@@ -244,8 +244,10 @@ async function start(
   const approvals = new TelegramApprovalAnswerer({ surface, pending, targetOf })
 
   const turns = new TurnBridge({
-    surface,
+    chat: api,
     targetOf,
+    // Only a private chat has a draft API; a group id is negative.
+    canDraft: (chat) => !chat.chatId.startsWith('-'),
     ...(config.streaming.enabled ? { throttleMs: config.streaming.throttleMs } : {}),
     placeholder: config.streaming.placeholder,
     logger,

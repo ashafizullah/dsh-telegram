@@ -16,11 +16,11 @@
  */
 
 import type { ChatTarget } from '../interact/surface.js'
-import type { ChatSurface } from '../interact/surface.js'
 import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
 
-import { ReplyStream } from './streamer.js'
+import { RichReplyStream } from './rich-stream.js'
+import type { RichChat } from './rich-stream.js'
 
 /** The session-event shapes this bridge reads. */
 export type SessionEvent =
@@ -44,18 +44,24 @@ export type SessionEvent =
 
 /** Construction options. */
 export interface TurnBridgeOptions {
-  readonly surface: ChatSurface
+  readonly chat: RichChat
   /** Resolve a session id to its chat, or undefined when it is not a Telegram one. */
   readonly targetOf: (sessionId: string) => ChatTarget | undefined
+  /**
+   * Whether a conversation can stream through drafts. Only private chats can:
+   * `sendRichMessageDraft` takes a private chat id and nothing else.
+   */
+  readonly canDraft: (target: ChatTarget) => boolean
   readonly throttleMs?: number
   readonly placeholder?: string
+  readonly heartbeatMs?: number
   readonly logger?: Logger
 }
 
 /** One turn being streamed. */
 interface ActiveTurn {
   readonly turn: number
-  readonly stream: ReplyStream
+  readonly stream: RichReplyStream
   /** Authoritative text from `assistant/message`, when it has arrived. */
   finalText?: string
 }
@@ -113,11 +119,16 @@ export class TurnBridge {
     // A previous turn that never closed would otherwise leak its stream.
     await this.closeActive(sessionId)
 
-    const stream = new ReplyStream({
-      surface: this.options.surface,
+    const stream = new RichReplyStream({
+      chat: this.options.chat,
       target,
+      canDraft: this.options.canDraft(target),
+      // Stable for the turn, so Telegram animates one growing preview rather
+      // than replacing it. Non-zero is required.
+      draftId: draftIdFor(sessionId, event.data.turn),
       ...(this.options.throttleMs !== undefined ? { throttleMs: this.options.throttleMs } : {}),
       ...(this.options.placeholder !== undefined ? { placeholder: this.options.placeholder } : {}),
+      ...(this.options.heartbeatMs !== undefined ? { heartbeatMs: this.options.heartbeatMs } : {}),
       logger: this.logger,
     })
 
@@ -170,4 +181,21 @@ export class TurnBridge {
     this.active.delete(sessionId)
     await entry.stream.finish(entry.finalText).catch(() => undefined)
   }
+}
+
+/**
+ * A draft id for one turn of one session.
+ *
+ * Telegram animates frames sharing an id, so it must be stable across a turn
+ * and different between turns — otherwise a new reply would animate out of the
+ * previous one. Derived rather than counted so a restart mid-conversation
+ * cannot collide with an id already in flight.
+ */
+function draftIdFor(sessionId: string, turn: number): number {
+  let hash = 0
+  for (let index = 0; index < sessionId.length; index += 1) {
+    hash = (hash * 31 + sessionId.charCodeAt(index)) | 0
+  }
+  // Non-zero and inside the safe integer range Telegram accepts.
+  return Math.abs(hash % 1_000_000_000) * 1000 + (turn % 1000) + 1
 }

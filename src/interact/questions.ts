@@ -24,7 +24,6 @@
  */
 
 import { escapeHtml } from '../render/escape.js'
-import { renderMarkdown } from '../render/markdown.js'
 import type {
   AskUserQuestionAnswer,
   AskUserQuestionAnswerItem,
@@ -149,7 +148,8 @@ export class TelegramQuestionProvider implements UserQuestionProvider {
     signal: AbortSignal | undefined,
   ): Promise<AskUserQuestionAnswerItem> {
     if (question.detail !== undefined) {
-      await this.options.surface.send(target, renderDetail(question))
+      // Agent-authored markdown — a plan, a diff — so Telegram renders it.
+      await this.options.surface.sendMarkdown(target, question.detail)
     }
 
     const options = question.options ?? []
@@ -269,11 +269,6 @@ function renderPrompt(question: AskUserQuestionItem, selected: readonly number[]
   }
 
   return lines.join('\n')
-}
-
-/** Supporting detail — a plan, a diff — rendered as markdown in its own message. */
-function renderDetail(question: AskUserQuestionItem): string {
-  return renderMarkdown(question.detail as string)
 }
 
 /** Buttons for one question: the options, plus Done and Other where they apply. */

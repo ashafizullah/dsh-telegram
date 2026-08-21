@@ -12,9 +12,16 @@ function fakeSurface() {
   const edits: { messageId: number; html: string; keyboard?: InlineKeyboard }[] = []
   let nextId = 100
 
+  const markdown: string[] = []
+
   const surface: ChatSurface = {
     async send(_target: ChatTarget, html, keyboard) {
       sent.push({ html, ...(keyboard ? { keyboard } : {}) })
+      return (nextId += 1)
+    },
+    async sendMarkdown(_target: ChatTarget, text) {
+      markdown.push(text)
+      sent.push({ html: text })
       return (nextId += 1)
     },
     async edit(_target, messageId, html, keyboard) {
@@ -22,7 +29,7 @@ function fakeSurface() {
     },
   }
 
-  return { surface, sent, edits, last: () => sent[sent.length - 1] }
+  return { surface, sent, edits, markdown, last: () => sent[sent.length - 1] }
 }
 
 /** Build a provider wired to a fake chat, bound to session 'S'. */
@@ -225,7 +232,9 @@ describe('TelegramQuestionProvider — plan review', () => {
     })
 
     await vi.waitFor(() => expect(chat.last()?.keyboard).toBeDefined())
-    expect(chat.sent.map((s) => s.html).join('')).toContain('do a thing')
+    // The plan is agent-authored markdown, sent for Telegram to render, so it
+    // arrives exactly as written rather than converted on the way.
+    expect(chat.markdown).toEqual(['## Steps\n\n- do a thing'])
     expect(lastKeyboard(chat).flat()[0]?.text).toContain('Go ahead')
 
     // The plan body is its own message, so the buttons are on the second send.

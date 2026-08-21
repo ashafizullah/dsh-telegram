@@ -10,10 +10,13 @@ Running an agent from a chat app breaks down at two specific points, and this
 plugin is built around fixing them.
 
 **The agent writes markdown; Telegram was getting it raw.** Models answer with
-`**bold**`, headings, bullet lists and fenced code. Sent as plain text, all of
-that arrives as literal asterisks and backticks. This plugin renders replies to
-Telegram HTML and sends them with `parse_mode`, so code blocks are code blocks
-— including while the answer is still streaming in.
+`**bold**`, headings, tables, task lists and fenced code. Sent as plain text,
+all of that arrives as literal asterisks and pipes.
+
+Since Bot API 10.1 Telegram parses markdown itself, so this plugin forwards the
+agent's reply almost verbatim through `sendRichMessage` — tables render as
+tables, checklists as checklists — and the message cap rises from 4096 to
+32768 characters with it.
 
 **The agent asks questions; there was nowhere to answer them.** When the agent
 calls `ask_user_question`, or a tool needs your permission, the harness blocks
@@ -101,8 +104,8 @@ Every field has a working default; an empty config runs.
 | `baseUrl` | `https://api.telegram.org` | Bot API origin; change only for a proxy |
 | `allowFrom` | `[]` | User ids allowed in; empty enables the claim flow |
 | `cwd` | harness cwd | Working directory new conversations start in |
-| `streaming.enabled` | `true` | Edit one message as the answer streams |
-| `streaming.throttleMs` | `1200` | Minimum gap between edits |
+| `streaming.enabled` | `true` | Show the answer as it is written |
+| `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
 | `streaming.placeholder` | `…` | Shown before any text arrives |
 | `longPollSeconds` | `25` | How long Telegram holds an empty poll open |
 
@@ -129,8 +132,22 @@ UpdatePoller ──► UpdateRouter ──┬──► SessionRunner ──► c
                                 ├──► TelegramQuestionProvider ──► ctx.userQuestions
                                 └──► TelegramApprovalAnswerer ──► approval/request
 
-ctx.on('session/event') ──► TurnBridge ──► ReplyStream ──► markdown → HTML → Telegram
+ctx.on('session/event') ──► TurnBridge ──► RichReplyStream ──► sendRichMessage
 ```
+
+### How a reply is streamed
+
+Telegram offers two mechanisms, and they are not interchangeable:
+
+- **Private chats** use `sendRichMessageDraft` — an ephemeral preview that
+  animates between frames sharing a draft id. It expires 30 seconds after its
+  last frame, so a heartbeat re-sends the current text during a long tool call;
+  otherwise the preview would vanish and the bot would look dead. A draft is
+  never persisted, so the turn ends with a real `sendRichMessage`.
+- **Groups have no draft API.** There a placeholder is posted immediately and
+  replaced with the finished reply, so the room still sees the bot working.
+
+Both end with one permanent rich message.
 
 Access is checked before anything else, so no unauthorised text reaches the
 agent — not even a command.
@@ -139,7 +156,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 323 tests
+pnpm test          # 327 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle
@@ -163,6 +180,13 @@ fails there by name instead of showing up as a blank Settings page.
 
 React and the shell's own packages are marked external; bundling a second React
 would break every hook the moment the page mounted.
+
+### Requirements
+
+Bot API **10.1 or later**, for `sendRichMessage` and `sendRichMessageDraft`.
+There is no HTML fallback: Telegram's rich markdown parser is forgiving — an
+unterminated code fence or a line of stray markers is accepted rather than
+rejected — so a mid-stream frame does not need one.
 
 ## License
 

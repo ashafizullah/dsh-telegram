@@ -84,15 +84,40 @@ describe('TelegramApi — html messages', () => {
     })
   })
 
-  it('retries as plain text when Telegram rejects the entities', async () => {
-    const { api, calls } = apiWith([
-      { status: 400, ok: false, error_code: 400, description: "Bad Request: can't parse entities" },
-      { ok: true, result: { message_id: 8 } },
+  it('sends rich markdown, which Telegram parses itself', async () => {
+    const { api, calls } = apiWith([{ ok: true, result: { message_id: 7 } }])
+    await api.sendRichMessage({ chatId: '1', markdown: '| a | b |\n| - | - |\n| 1 | 2 |' })
+
+    expect(calls[0]?.url).toContain('/sendRichMessage')
+    expect(calls[0]?.body?.rich_message).toEqual({
+      markdown: '| a | b |\n| - | - |\n| 1 | 2 |',
+    })
+  })
+
+  it('streams a draft under a stable id, which Telegram animates', async () => {
+    const { api, calls } = apiWith([{ ok: true, result: true }])
+    await api.sendRichMessageDraft({ chatId: '1', draftId: 42, markdown: 'partial' })
+
+    expect(calls[0]?.url).toContain('/sendRichMessageDraft')
+    expect(calls[0]?.body?.draft_id).toBe(42)
+    expect(calls[0]?.body?.rich_message).toEqual({ markdown: 'partial' })
+  })
+
+  it('replaces a message with rich markdown', async () => {
+    const { api, calls } = apiWith([{ ok: true, result: { message_id: 2 } }])
+    await api.editRichMessage({ chatId: '1', messageId: 2, markdown: '# done' })
+
+    expect(calls[0]?.url).toContain('/editMessageText')
+    expect(calls[0]?.body?.rich_message).toEqual({ markdown: '# done' })
+  })
+
+  it('reports an unchanged rich edit rather than throwing', async () => {
+    const { api } = apiWith([
+      { status: 400, ok: false, error_code: 400, description: 'Bad Request: message is not modified' },
     ])
-    await api.sendMessage({ chatId: '1', html: '<b>broken' })
-    expect(calls).toHaveLength(2)
-    expect(calls[1]?.body?.parse_mode).toBeUndefined()
-    expect(calls[1]?.body?.text).toBe('broken')
+    await expect(
+      api.editRichMessage({ chatId: '1', messageId: 2, markdown: 'same' }),
+    ).resolves.toBe('unchanged')
   })
 })
 

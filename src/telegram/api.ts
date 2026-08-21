@@ -8,17 +8,16 @@
  * Three behaviours are deliberate and are the reason this client exists rather
  * than a thin fetch wrapper:
  *
- * - **HTML is the default, and it never costs a message.** Every text send
- *   carries `parse_mode: "HTML"`; if Telegram rejects the entities the message
- *   is re-sent as plain text instead of being lost.
+ * - **Replies are sent as rich markdown.** Since Bot API 10.1 Telegram parses
+ *   markdown itself, so the agent's tables, headings and lists arrive as real
+ *   elements. The plugin's own prompts stay on plain HTML: they are short,
+ *   built from escaped text, and carry the inline keyboards.
  * - **Rate limits are waited out, not thrown.** A 429 carries `retry_after`;
  *   the client sleeps that long and retries, so a burst of streaming edits
  *   degrades into slower edits rather than a failed turn.
  * - **The token never reaches a log.** It lives in the request path, so every
  *   error message is redacted before it escapes.
  */
-
-import { htmlToPlain } from '../render/plain.js'
 
 import type {
   BotUser,
@@ -87,6 +86,27 @@ export interface EditMessageOptions {
 /** Outcome of an edit: Telegram treats a no-op edit as an error, we do not. */
 export type EditOutcome = 'edited' | 'unchanged'
 
+/** Arguments for sending one rich message. */
+export interface SendRichOptions {
+  readonly chatId: string
+  /** Rich Markdown, which Telegram parses and renders itself. */
+  readonly markdown: string
+  readonly keyboard?: InlineKeyboard
+  readonly replyToMessageId?: number
+  readonly threadId?: number
+  readonly signal?: AbortSignal
+}
+
+/** Arguments for one frame of a streamed draft. */
+export interface DraftOptions {
+  readonly chatId: string
+  /** Stable across a turn: Telegram animates changes to the same draft id. */
+  readonly draftId: number
+  readonly markdown: string
+  readonly threadId?: number
+  readonly signal?: AbortSignal
+}
+
 export class TelegramApi {
   private readonly fetchImpl: typeof fetch
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>
@@ -141,20 +161,10 @@ export class TelegramApi {
       ...(options.threadId !== undefined ? { message_thread_id: options.threadId } : {}),
     }
 
-    try {
-      const sent = await this.call<{ message_id: number }>('sendMessage', body, {
-        ...(options.signal ? { signal: options.signal } : {}),
-      })
-      return { messageId: sent.message_id }
-    } catch (error) {
-      if (!isParseFailure(error)) throw error
-      const sent = await this.call<{ message_id: number }>(
-        'sendMessage',
-        { ...body, text: htmlToPlain(options.html), parse_mode: undefined },
-        { ...(options.signal ? { signal: options.signal } : {}) },
-      )
-      return { messageId: sent.message_id }
-    }
+    const sent = await this.call<{ message_id: number }>('sendMessage', body, {
+      ...(options.signal ? { signal: options.signal } : {}),
+    })
+    return { messageId: sent.message_id }
   }
 
   /**
@@ -181,18 +191,73 @@ export class TelegramApi {
       return 'edited'
     } catch (error) {
       if (isNotModified(error)) return 'unchanged'
-      if (!isParseFailure(error)) throw error
-      try {
-        await this.call('editMessageText', {
-          ...body,
-          text: htmlToPlain(options.html),
-          parse_mode: undefined,
-        })
-        return 'edited'
-      } catch (fallbackError) {
-        if (isNotModified(fallbackError)) return 'unchanged'
-        throw fallbackError
-      }
+      throw error
+    }
+  }
+
+  /**
+   * Send one rich message.
+   *
+   * Telegram parses the Rich Markdown itself, so tables, headings, lists and
+   * task lists arrive as real elements rather than as an approximation of
+   * them — and the cap is 32768 characters rather than 4096.
+   */
+  async sendRichMessage(options: SendRichOptions): Promise<{ messageId: number }> {
+    const sent = await this.call<{ message_id: number }>(
+      'sendRichMessage',
+      {
+        chat_id: options.chatId,
+        rich_message: { markdown: options.markdown },
+        ...(options.keyboard ? { reply_markup: toReplyMarkup(options.keyboard) } : {}),
+        ...(options.replyToMessageId
+          ? { reply_parameters: { message_id: options.replyToMessageId } }
+          : {}),
+        ...(options.threadId !== undefined ? { message_thread_id: options.threadId } : {}),
+      },
+      { ...(options.signal ? { signal: options.signal } : {}) },
+    )
+    return { messageId: sent.message_id }
+  }
+
+  /**
+   * Stream one frame of a partial reply.
+   *
+   * The draft is a 30-second ephemeral preview, and Telegram animates changes
+   * carrying the same `draftId` — so a turn keeps one id throughout and the
+   * text grows in place. It must still be persisted with a real send when the
+   * turn ends, and it works in private chats only.
+   */
+  async sendRichMessageDraft(options: DraftOptions): Promise<void> {
+    await this.call(
+      'sendRichMessageDraft',
+      {
+        chat_id: options.chatId,
+        draft_id: options.draftId,
+        rich_message: { markdown: options.markdown },
+        ...(options.threadId !== undefined ? { message_thread_id: options.threadId } : {}),
+      },
+      { ...(options.signal ? { signal: options.signal } : {}) },
+    )
+  }
+
+  /** Replace a message's content with rich markdown. */
+  async editRichMessage(options: {
+    chatId: string
+    messageId: number
+    markdown: string
+    keyboard?: InlineKeyboard
+  }): Promise<EditOutcome> {
+    try {
+      await this.call('editMessageText', {
+        chat_id: options.chatId,
+        message_id: options.messageId,
+        rich_message: { markdown: options.markdown },
+        ...(options.keyboard ? { reply_markup: toReplyMarkup(options.keyboard) } : {}),
+      })
+      return 'edited'
+    } catch (error) {
+      if (isNotModified(error)) return 'unchanged'
+      throw error
     }
   }
 
@@ -388,14 +453,6 @@ function retryDelay(error: unknown, attempt: number): number | undefined {
   if (error.code === 429) return 1000
 
   return BACKOFF_MS[attempt] ?? BACKOFF_MS[BACKOFF_MS.length - 1]
-}
-
-/** Whether a failure means "your HTML is malformed". */
-function isParseFailure(error: unknown): boolean {
-  if (!(error instanceof TelegramApiError)) return false
-  return /can't parse entities|unsupported start tag|unmatched end tag/i.test(
-    error.description ?? '',
-  )
 }
 
 /** Whether a failure means "the edit changed nothing", which is not a failure. */
