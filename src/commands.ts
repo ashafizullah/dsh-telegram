@@ -30,6 +30,7 @@ export const COMMANDS: Readonly<Record<string, string>> = {
   model: 'Show or change the model: /model list, or /model provider/model',
   effort: 'Show or change the reasoning effort: /effort high',
   permission: 'Show or change what the agent may do: /permission read-only',
+  screenshot: "Send a picture of the harness machine's screen",
   sessions: 'Pick up an earlier conversation from this chat',
   status: 'Show the session, working directory, and who owns the bot',
   stop: 'Cancel whatever the agent is doing right now',

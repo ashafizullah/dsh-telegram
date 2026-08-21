@@ -40,6 +40,12 @@ function carriesImage(content: readonly PromptPart[]): boolean {
   return content.some((part) => part.type === 'image')
 }
 
+/** One line of a conversation's description. */
+export interface StatusRow {
+  readonly label: string
+  readonly value: string
+}
+
 /** A live agent this plugin drives. */
 export interface RunningAgent {
   readonly sessionId: string
@@ -292,29 +298,35 @@ export class SessionRunner implements AgentRunner {
   }
 
   /**
-   * Describe the conversation, as Telegram HTML.
+   * Describe the conversation as rows, for the caller to render.
+   *
+   * Rows rather than finished markup, because the caller adds its own — the
+   * model, the effort, what the agent may do — and stitching those onto a
+   * rendered string would mean parsing it back apart.
    */
-  async status(target: ChatTarget): Promise<string> {
+  async status(target: ChatTarget): Promise<StatusRow[]> {
+    const directory = this.options.cwdFor(target)
     const binding = this.options.bindings.forChat(target)
+
+    // Worth naming the directory even with no conversation: it is what the
+    // next message opens in, and `/cd` before the first message is reasonable.
     if (!binding) {
-      // Still worth naming the directory: it is what the next message opens in,
-      // and `/cd` before the first message is a reasonable thing to do.
       return [
-        'No conversation yet — send a message to start one.',
-        `<b>Working directory</b> <code>${escapeHtml(this.options.cwdFor(target))}</code>`,
-      ].join('\n')
+        { label: 'Session', value: 'none yet — send a message to start one' },
+        { label: 'Directory', value: directory },
+      ]
     }
 
     const live = this.options.host.live(binding.sessionId) !== undefined
     return [
-      // Escaped for the same reason `/help` is: an unbalanced tag makes
-      // Telegram refuse the whole message, and a working directory is a path
-      // the operator chose, not a value this plugin controls.
-      `<b>Session</b> <code>${escapeHtml(binding.sessionId)}</code>`,
-      `<b>Working directory</b> <code>${escapeHtml(this.options.cwdFor(target))}</code>`,
-      `<b>State</b> ${live ? 'loaded' : 'idle (will resume on your next message)'}`,
-      `<b>Since</b> ${new Date(binding.createdAt).toISOString()}`,
-    ].join('\n')
+      { label: 'Session', value: binding.sessionId },
+      { label: 'Directory', value: directory },
+      { label: 'State', value: live ? 'loaded' : 'idle, resumes on your next message' },
+      {
+        label: 'Since',
+        value: new Date(binding.createdAt).toISOString().replace('T', ' ').slice(0, 16),
+      },
+    ]
   }
 
   /**

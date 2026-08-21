@@ -315,6 +315,73 @@ export class TelegramApi {
   }
 
   /**
+   * Upload one file to a chat.
+   *
+   * Multipart rather than the JSON path every other call uses, because
+   * Telegram takes file bytes no other way. Node builds the body: `FormData`
+   * and `Blob` are standard here, so there is no boundary to get wrong.
+   *
+   * Not retried. A retry would re-upload the whole file, and the failures that
+   * matter for one — too large, wrong type — do not pass on a second attempt.
+   *
+   * @param method - `sendPhoto` or `sendDocument`.
+   * @param field - the form field Telegram expects the bytes under.
+   * @param options - the chat, the bytes, and what to call them.
+   */
+  async uploadFile(
+    method: 'sendPhoto' | 'sendDocument',
+    field: 'photo' | 'document',
+    options: {
+      chatId: string
+      data: Uint8Array
+      filename: string
+      contentType: string
+      caption?: string
+      threadId?: number
+    },
+  ): Promise<{ messageId: number }> {
+    const form = new FormData()
+    form.set('chat_id', options.chatId)
+    if (options.caption !== undefined) form.set('caption', options.caption)
+    if (options.caption !== undefined) form.set('parse_mode', 'HTML')
+    if (options.threadId !== undefined) form.set('message_thread_id', String(options.threadId))
+    form.set(
+      field,
+      // Copied into a plain ArrayBuffer: a Uint8Array view may sit on a larger
+      // pooled buffer, and Blob would take the whole thing.
+      new Blob([options.data.slice().buffer as ArrayBuffer], { type: options.contentType }),
+      options.filename,
+    )
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.downloadTimeoutMs)
+
+    try {
+      const response = await this.fetchImpl(`${this.base()}/bot${this.options.token}/${method}`, {
+        method: 'POST',
+        body: form,
+        signal: controller.signal,
+      })
+
+      const envelope = parseEnvelope(await response.text(), method)
+      if (!envelope.ok) {
+        throw new TelegramApiError(
+          this.redact(
+            `telegram ${method} failed: ${envelope.description ?? `http ${response.status}`}`,
+          ),
+          envelope.error_code ?? response.status,
+          envelope.description === undefined ? undefined : this.redact(envelope.description),
+        )
+      }
+      return { messageId: (envelope.result as { message_id: number }).message_id }
+    } catch (error) {
+      throw this.normalize(error, method)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
    * Publish the command menu Telegram offers when someone types `/`.
    *
    * Without this the bot answers every command correctly and advertises none

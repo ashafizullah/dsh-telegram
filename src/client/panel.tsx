@@ -30,6 +30,7 @@ export interface TelegramSettings {
   longPollSeconds: number
   streaming: { enabled: boolean; throttleMs: number; placeholder: string }
   media: { enabled: boolean; maxBytes: number; maxTextChars: number; visionModel: string }
+  screenshot: { enabled: boolean }
   reconnect: { baseDelayMs: number; maxDelayMs: number }
 }
 
@@ -76,7 +77,7 @@ export function TelegramPanel({ scope, remote, t }: PanelProps) {
   const overridden = (field: string) => isOverridden(snapshot.user, field)
 
   /** Write one field of a nested object by replacing the whole object. */
-  const writeNested = <K extends 'streaming' | 'media' | 'reconnect'>(
+  const writeNested = <K extends 'streaming' | 'media' | 'reconnect' | 'screenshot'>(
     parent: K,
     patch: Partial<TelegramSettings[K]>,
   ) => write(parent, { ...value[parent], ...patch })
@@ -164,6 +165,23 @@ export function TelegramPanel({ scope, remote, t }: PanelProps) {
           disabled={locked || !value.media.enabled}
           onChange={(next) => writeNested('media', { visionModel: next })}
         />
+      </Section>
+
+      <Section title={t('screenTitle')}>
+        <Row
+          label={t('screenshotEnabled')}
+          hint={t('screenshotHint')}
+          overridden={overridden('screenshot')}
+          overriddenLabel={t('overridden')}
+          resetLabel={t('reset')}
+          onReset={() => clear('screenshot')}
+        >
+          <Toggle
+            checked={value.screenshot.enabled}
+            disabled={locked}
+            onChange={(next) => writeNested('screenshot', { enabled: next })}
+          />
+        </Row>
       </Section>
 
       <Section title={t('repliesTitle')}>

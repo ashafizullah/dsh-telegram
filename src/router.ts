@@ -27,6 +27,7 @@ import type { Logger } from './harness/types.js'
 import { SILENT_LOGGER } from './harness/types.js'
 import type { MediaCollector, PromptPart } from './media/collect.js'
 import type { TelegramMessage, TelegramUpdate } from './telegram/types.js'
+import type { StatusRow } from './session/runner.js'
 
 /** What the router needs to drive a conversation's agent. */
 export interface AgentRunner {
@@ -36,14 +37,23 @@ export interface AgentRunner {
   reset(target: ChatTarget): Promise<void>
   /** Cancel the in-flight turn; resolves to whether anything was running. */
   stop(target: ChatTarget): Promise<boolean>
-  /** A short human-readable status line for this conversation. */
-  status(target: ChatTarget): Promise<string>
+  /** What this conversation is, as rows the caller renders. */
+  status(target: ChatTarget): Promise<StatusRow[]>
 }
 
 /** The bits of the Bot API the router itself uses. */
 export interface RouterChat {
   sendMessage(options: { chatId: string; html: string; threadId?: number }): Promise<unknown>
   answerCallbackQuery(id: string, text?: string): Promise<void>
+  /**
+   * Post markdown for Telegram to render. Absent on a deployment below Bot API
+   * 10.1, where a table would arrive as pipes and dashes.
+   */
+  sendRichMessage?(options: {
+    chatId: string
+    markdown: string
+    threadId?: number
+  }): Promise<{ messageId: number }>
 }
 
 /**
@@ -113,9 +123,38 @@ export interface PermissionControlSeam {
   clear(target: ChatTarget): Promise<void>
 }
 
+/** Capturing the screen and putting it in the chat. */
+export interface ScreenControl {
+  /**
+   * Take one and send it.
+   *
+   * @returns undefined on success, or a sentence saying what went wrong.
+   */
+  send(target: ChatTarget): Promise<string | undefined>
+}
+
 /** Shows that a conversation is being worked on, until released. */
 export interface TypingHold {
   hold(target: ChatTarget): () => void
+}
+
+/**
+ * Render the conversation's facts as a markdown table.
+ *
+ * Pipes inside a value would split a cell and shift every column after it, so
+ * they are escaped — a working directory can contain one, and a model id from
+ * a router-style provider routinely does.
+ */
+function statusTable(rows: readonly StatusRow[]): string {
+  const body = rows
+    .map((row) => `| ${escapeCell(row.label)} | ${escapeCell(row.value)} |`)
+    .join('\n')
+  return `| | |\n| --- | --- |\n${body}`
+}
+
+/** Keep a value inside its own cell. */
+function escapeCell(value: string): string {
+  return value.split('|').join('\\|').replace(/\r?\n/g, ' ')
 }
 
 /** Routes callback data to whichever feature owns it. */
@@ -146,6 +185,8 @@ export interface UpdateRouterOptions {
   readonly effort?: EffortControl
   /** Absent leaves every conversation on the deployment's permission preset. */
   readonly permission?: PermissionControlSeam
+  /** Takes and sends a picture of the screen. Absent means screenshots are off. */
+  readonly screen?: ScreenControl
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
@@ -354,6 +395,9 @@ export class UpdateRouter {
       case 'permission':
         return await this.onPermission(target, args)
 
+      case 'screenshot':
+        return await this.onScreenshot(target)
+
       case 'sessions':
         if (!this.options.sessions) {
           return await this.say(target, 'This deployment does not keep a conversation list.')
@@ -366,7 +410,7 @@ export class UpdateRouter {
       }
 
       case 'status':
-        return await this.say(target, await this.describeConversation(target))
+        return await this.describeConversation(target)
 
       default:
         // Unreachable: parseCommand only returns names present in COMMANDS.
@@ -393,6 +437,32 @@ export class UpdateRouter {
   }
 
   /**
+   * Send a picture of the screen the harness is running on.
+   *
+   * @param target - the conversation to send it to.
+   */
+  private async onScreenshot(target: ChatTarget): Promise<void> {
+    const screen = this.options.screen
+    if (!screen) {
+      return await this.say(
+        target,
+        'Screenshots are off. Turn them on in Settings → Telegram → Screen.',
+      )
+    }
+
+    const release = this.options.typing?.hold(target)
+    try {
+      const failure = await screen.send(target)
+      if (failure !== undefined) await this.say(target, `⚠️ ${escapeHtml(failure)}`)
+    } catch (error) {
+      this.logger.error('[dsh-telegram] could not take a screenshot', error)
+      await this.say(target, '⚠️ The screenshot could not be taken.')
+    } finally {
+      release?.()
+    }
+  }
+
+  /**
    * Everything about this conversation worth knowing in one message.
    *
    * The settings live behind four commands, and having to run all four to
@@ -402,21 +472,41 @@ export class UpdateRouter {
    *
    * @param target - the conversation.
    */
-  private async describeConversation(target: ChatTarget): Promise<string> {
-    const lines = [await this.options.runner.status(target)]
+  private async describeConversation(target: ChatTarget): Promise<void> {
+    const rows = [...(await this.options.runner.status(target))]
 
     const models = this.options.models
-    if (models) lines.push(`<b>Model</b> <code>${escapeHtml(models.describe(target))}</code>`)
+    if (models) rows.push({ label: 'Model', value: models.describe(target) })
 
     const effort = this.options.effort
-    if (effort) lines.push(`<b>Effort</b> <code>${escapeHtml(effort.describe(target))}</code>`)
+    if (effort) rows.push({ label: 'Effort', value: effort.describe(target) })
 
     const permission = this.options.permission
-    if (permission) {
-      lines.push(`<b>Permission</b> <code>${escapeHtml(permission.describe(target))}</code>`)
+    if (permission) rows.push({ label: 'Permission', value: permission.describe(target) })
+
+    // Sent as markdown so Telegram draws it as a real table — since Bot API
+    // 10.1 it parses these itself, which is the same path an agent's own
+    // tables take. A deployment without the rich send falls back to lines.
+    const rich = this.options.chat.sendRichMessage
+    if (rich) {
+      try {
+        await rich({
+          chatId: target.chatId,
+          markdown: statusTable(rows),
+          ...(target.threadId !== undefined ? { threadId: target.threadId } : {}),
+        })
+        return
+      } catch (error) {
+        this.logger.warn('[dsh-telegram] could not send the status table', error)
+      }
     }
 
-    return lines.join('\n')
+    await this.say(
+      target,
+      rows
+        .map((row) => `<b>${escapeHtml(row.label)}</b> <code>${escapeHtml(row.value)}</code>`)
+        .join('\n'),
+    )
   }
 
   /**

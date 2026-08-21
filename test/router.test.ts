@@ -35,6 +35,8 @@ async function build(
     efforts?: string[]
     /** Set false to run without the permission seam. */
     permission?: boolean
+    /** Set false to run below Bot API 10.1, where a table is just pipes. */
+    richMessages?: boolean
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
@@ -49,7 +51,10 @@ async function build(
     prompt: vi.fn(async () => undefined),
     reset: vi.fn(async () => undefined),
     stop: vi.fn(async () => true),
-    status: vi.fn(async () => 'session ch-1, cwd /tmp'),
+    status: vi.fn(async () => [
+      { label: 'Session', value: 'ch-1' },
+      { label: 'Directory', value: '/tmp' },
+    ]),
   }
   const questions = { handleCallback: vi.fn(() => false) }
   const approvals = { handleCallback: vi.fn(() => false) }
@@ -128,6 +133,14 @@ async function build(
     chat: {
       sendMessage: async ({ html }) => void said.push(html),
       answerCallbackQuery: async (id) => void answered.push(id),
+      ...(options.richMessages === false
+        ? {}
+        : {
+            sendRichMessage: async ({ markdown }: { markdown: string }) => {
+              said.push(markdown)
+              return { messageId: said.length }
+            },
+          }),
     },
     access,
     questions,
@@ -256,6 +269,34 @@ describe('UpdateRouter — commands', () => {
     const { router, said } = await build()
     await router.handle(message('/status'))
     expect(said[0]).toContain('ch-1')
+  })
+
+  it('draws it as a table, which Telegram renders itself since Bot API 10.1', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/status'))
+
+    const status = said[said.length - 1] ?? ''
+    expect(status).toContain('| --- | --- |')
+    expect(status).toContain('| Session | ch-1 |')
+  })
+
+  it('keeps a pipe inside its own cell, rather than shifting every column', async () => {
+    // A working directory can contain one, and a router-style model id does
+    // routinely.
+    const { router, said, runner } = await build()
+    runner.status = vi.fn(async () => [{ label: 'Model', value: 'router/a|b' }])
+
+    await router.handle(message('/status'))
+    expect(said[said.length - 1]).toContain('router/a\\|b')
+  })
+
+  it('falls back to lines below Bot API 10.1, where a table is just pipes', async () => {
+    const { router, said } = await build({ richMessages: false })
+    await router.handle(message('/status'))
+
+    const status = said[said.length - 1] ?? ''
+    expect(status).toContain('<b>Session</b>')
+    expect(status).not.toContain('| --- |')
   })
 
   it('answers "what am I talking to" in one message, not four commands', async () => {

@@ -121,6 +121,7 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/model [apa]` | Lihat model, `/model list`, atau ganti ke salah satu |
 | `/effort [level]` | Lihat atau ganti seberapa dalam model berpikir |
 | `/permission [nama]` | Lihat atau ganti apa yang boleh dilakukan agent di sini |
+| `/screenshot` | Kirim tangkapan layar mesin tempat harness jalan |
 | `/sessions` | Lanjutkan percakapan lama dari chat ini |
 | `/status` | ID sesi, working directory, dan apakah sedang dimuat |
 | `/stop` | Batalkan apa pun yang sedang dikerjakan agent |
@@ -151,6 +152,29 @@ khusus untuk percakapan Telegram.
 Ini juga yang menentukan tombol izin berfungsi atau tidak: di bawah preset yang
 kebijakannya `never`, tidak pernah ada yang meminta izin, jadi tombolnya tidak
 mungkin muncul. Memilih preset yang bertanya itulah yang menghidupkannya.
+
+### Tangkapan layar
+
+`/screenshot` mengirim apa yang sedang ditampilkan mesin tempat harness jalan.
+Ini alasan bot ini ada, cuma diterapkan ke layarnya sendiri: mesinnya di meja,
+kamu tidak — jadi mengecek build panjang itu sudah sampai mana biasanya berarti
+harus balik ke keyboard.
+
+Bawaannya **mati**, dan tombolnya sengaja ditaruh di setting deployment, bukan
+jadi perintah chat. Layar memuat apa pun yang kebetulan ada di sana — password
+manager yang terbuka, chat orang lain, data klien yang tidak ada hubungannya —
+dan ini satu-satunya hal di sini yang mengirim isi mesinmu ke luar tanpa
+melibatkan agent sama sekali. Menyalakannya seharusnya butuh akses yang sama
+dengan mengonfigurasi bot-nya.
+
+Di macOS juga perlu izin Screen Recording untuk proses yang menjalankan
+harness. Tanpa itu `screencapture` **tetap berhasil** tapi mengembalikan gambar
+desktop tanpa satu jendela pun — kelihatan seperti fitur rusak, padahal cuma
+izin yang kurang. Makanya kasus itu disebutkan, bukan didiamkan. Beri izinnya di
+System Settings → Privacy & Security → Screen Recording, lalu restart harness.
+
+Tangkapan yang lewat batas foto 10 MB Telegram dikirim sebagai dokumen, yang
+muat sampai 50 MB — PNG dari layar besar rutin butuh itu.
 
 ### Kedalaman berpikir, dan apa yang boleh dilakukan
 
@@ -338,6 +362,7 @@ masalah.
 | `agentPreset` | `""` | Preset yang dipakai percakapan Telegram; kosong ikut bawaan deployment. Preset inilah yang menyediakan tool-nya |
 | `permissionPreset` | `""` | Preset izin untuk Telegram, dari tabel milik deployment; kosong ikut bawaan deployment |
 | `requireMentionInGroups` | `true` | Di grup, jawab hanya kalau di-@mention atau di-reply |
+| `screenshot.enabled` | `false` | Izinkan `/screenshot`. Bawaannya mati; di macOS juga butuh izin Screen Recording |
 | `streaming.enabled` | `true` | Tampilkan jawaban sambil ditulis |
 | `streaming.throttleMs` | `1200` | Jeda minimum antar frame stream |
 | `streaming.placeholder` | `…` | Isi yang ditampilkan di bawah baris tool sebelum teks pertama tiba |

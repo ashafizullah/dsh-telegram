@@ -110,6 +110,7 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | `/model [名称]` | 查看模型、`/model list`，或切换到某一个 |
 | `/effort [强度]` | 查看或调整模型思考的深度 |
 | `/permission [名称]` | 查看或调整 Agent 在这里被允许做什么 |
+| `/screenshot` | 发送 harness 所在机器的屏幕截图 |
 | `/sessions` | 继续这个聊天里较早的一段对话 |
 | `/status` | 会话 ID、工作目录，以及是否已加载 |
 | `/stop` | 取消 Agent 当前正在做的事 |
@@ -135,6 +136,25 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 
 它同时决定审批按钮能否工作：在审批策略为 `never` 的 preset 下，永远不会有人来
 请求许可，按钮也就永远不会出现。选一个会询问的 preset，才是把它们打开。
+
+### 屏幕截图
+
+`/screenshot` 会把 harness 所在机器正在显示的画面发过来。这正是这个机器人存在的
+理由，只不过用在了屏幕本身上：机器在桌上，而你不在——否则想看看那个跑了很久的构建
+现在显示到哪了，就得走回键盘前。
+
+它**默认关闭**，而且这个开关刻意放在部署设置里，而不是做成聊天命令。屏幕上有什么
+就会拍到什么——打开着的密码管理器、别人的消息、毫不相干的客户数据——而这是这里唯一
+一件不经过 Agent 就把本机内容发往外部的事。打开它，理应需要与配置这个机器人相同的
+权限。
+
+macOS 还需要给运行 harness 的进程「屏幕录制」权限。没有它，`screencapture` **仍会
+成功**，只是返回一张没有任何窗口的桌面图——看起来像功能坏了，其实只是缺权限。所以
+这种情况会被明确说出来，而不是含糊带过。请在 系统设置 → 隐私与安全性 → 屏幕录制
+中授权，然后重启 harness。
+
+超过 Telegram 10 MB 照片上限的截图会改以文件形式发送，那条通道可到 50 MB——大尺寸
+显示器的 PNG 经常需要。
 
 ### 思考强度，以及被允许做什么
 
@@ -279,6 +299,7 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 | `agentPreset` | `""` | Telegram 对话所用的 preset；留空则取部署默认值。工具正是由 preset 提供 |
 | `permissionPreset` | `""` | Telegram 使用的权限 preset，取自部署自己的表；留空则跟随部署默认值 |
 | `requireMentionInGroups` | `true` | 在群里，只有被 @提及或被回复时才作答 |
+| `screenshot.enabled` | `false` | 允许 `/screenshot`。默认关闭；macOS 还需要「屏幕录制」权限 |
 | `streaming.enabled` | `true` | 边生成边显示回答 |
 | `streaming.throttleMs` | `1200` | 两帧之间的最小间隔 |
 | `streaming.placeholder` | `…` | 在有正文之前，工具行下方显示的内容 |

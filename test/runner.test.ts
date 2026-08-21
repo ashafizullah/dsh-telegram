@@ -254,9 +254,20 @@ describe('SessionRunner — stop and status', () => {
     await expect(build(second.host).stop(CHAT)).resolves.toBe(false)
   })
 
+  /** The rows as one string, for asserting on what they say. */
+  const flatten = (rows: { label: string; value: string }[]) =>
+    rows.map((row) => `${row.label}=${row.value}`).join('\n')
+
   it('says there is no conversation before the first message', async () => {
     const fake = fakeHost()
-    await expect(build(fake.host).status(CHAT)).resolves.toContain('No conversation yet')
+    expect(flatten(await build(fake.host).status(CHAT))).toContain('none yet')
+  })
+
+  it('still names the directory before the first message', async () => {
+    // It is what the next message opens in, and /cd before saying anything is
+    // a reasonable thing to do.
+    const fake = fakeHost()
+    expect(flatten(await build(fake.host).status(CHAT))).toContain('/work')
   })
 
   it('reports the session id and working directory', async () => {
@@ -264,7 +275,7 @@ describe('SessionRunner — stop and status', () => {
     const runner = build(fake.host)
     await runner.prompt(CHAT, text('one'))
 
-    const status = await runner.status(CHAT)
+    const status = flatten(await runner.status(CHAT))
     expect(status).toContain('s1')
     expect(status).toContain('/work')
     expect(status).toContain('loaded')
@@ -275,7 +286,13 @@ describe('SessionRunner — stop and status', () => {
     await build(first.host).prompt(CHAT, text('one'))
 
     const second = fakeHost()
-    expect(await build(second.host).status(CHAT)).toContain('idle')
+    expect(flatten(await build(second.host).status(CHAT))).toContain('idle')
+  })
+
+  it('reports rows rather than markup, so the caller can add its own', async () => {
+    const fake = fakeHost()
+    const rows = await build(fake.host).status(CHAT)
+    expect(rows.map((row) => row.label)).toContain('Directory')
   })
 })
 
@@ -417,10 +434,10 @@ describe('SessionRunner — the permission preset', () => {
   })
 })
 
-describe('SessionRunner — the status line', () => {
-  it('escapes the working directory, which the operator chose', async () => {
-    // /status puts the path inside <code>. An unbalanced tag makes Telegram
-    // refuse the whole message, which is how /help came to answer with nothing.
+describe('SessionRunner — the status rows', () => {
+  it('reports the directory verbatim, leaving escaping to whoever renders it', async () => {
+    // Rows are data. Escaping here would double-escape the moment the caller
+    // renders them as anything other than the markup this guessed at.
     const fake = fakeHost()
     const runner = new SessionRunner({
       host: fake.host,
@@ -430,10 +447,9 @@ describe('SessionRunner — the status line', () => {
     })
 
     await runner.prompt(CHAT, text('hello'))
-    const status = await runner.status(CHAT)
+    const rows = await runner.status(CHAT)
 
-    expect(status).toContain('/work/&lt;repo&gt; &amp; co')
-    expect(status).not.toContain('<repo>')
+    expect(rows.find((row) => row.label === 'Directory')?.value).toBe('/work/<repo> & co')
   })
 })
 

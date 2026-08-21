@@ -62,6 +62,11 @@ export const locales = {
     visionModelUnreadable: 'Could not read the configured models. Add one in Settings → Models.',
     visionModelUnavailable: 'No longer configured',
 
+    screenTitle: 'Screen',
+    screenshotEnabled: 'Allow /screenshot',
+    screenshotHint:
+      "Sends a picture of this machine's screen to the chat. Off by default — a screen holds whatever happens to be on it. On macOS the harness also needs Screen Recording permission.",
+
     repliesTitle: 'Replies',
     streamingEnabled: 'Stream the answer as it is written',
     streamingHint: 'Off sends each reply once, when it is finished.',
@@ -126,6 +131,11 @@ export const locales = {
     visionModelLoading: '正在读取已配置的模型…',
     visionModelUnreadable: '无法读取已配置的模型。请先在 设置 → Models 中添加。',
     visionModelUnavailable: '已不再配置',
+
+    screenTitle: '屏幕',
+    screenshotEnabled: '允许 /screenshot',
+    screenshotHint:
+      '把本机屏幕的截图发到聊天里。默认关闭——屏幕上有什么就会拍到什么。在 macOS 上，harness 还需要「屏幕录制」权限。',
 
     repliesTitle: '回复',
     streamingEnabled: '边生成边显示回答',

@@ -114,6 +114,7 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/model [what]` | Show the model, `/model list`, or switch to one |
 | `/effort [level]` | Show or change how hard the model thinks |
 | `/permission [name]` | Show or change what the agent may do here |
+| `/screenshot` | Send a picture of the harness machine's screen |
 | `/sessions` | Pick up an earlier conversation from this chat |
 | `/status` | Session id, working directory, and whether it is loaded |
 | `/stop` | Cancel whatever the agent is doing right now |
@@ -143,6 +144,30 @@ the deployment's own presets for Telegram conversations alone.
 It also decides whether the approval buttons work: under a preset whose
 approval policy is `never` nothing ever asks, so they can never appear.
 Choosing one that asks is what turns them on.
+
+### A picture of the screen
+
+`/screenshot` sends what the harness machine is showing. It is the reason the
+bot exists, applied to the screen itself: the machine is at a desk and you are
+not, so checking what a long build is showing needs a trip back to the keyboard
+otherwise.
+
+It is **off by default**, and the switch is a deployment setting rather than a
+chat command on purpose. A screen holds whatever happens to be on it — an open
+password manager, someone else's messages, an unrelated customer's data — and
+this is the one thing here that sends the machine's own contents outward
+without the agent being involved. Turning it on should take the same access as
+configuring the bot.
+
+macOS also needs Screen Recording permission for the process running the
+harness. Without it `screencapture` still succeeds and returns the desktop
+picture with no windows, which looks like a broken feature rather than a
+missing permission, so that case is named rather than shrugged at. Grant it in
+System Settings → Privacy & Security → Screen Recording and restart the
+harness.
+
+A capture over Telegram's 10 MB photo limit is sent as a document instead,
+which takes 50 MB — a large display's PNG routinely needs it.
 
 ### Effort, and what the agent may do
 
@@ -318,6 +343,7 @@ Every field has a working default; an empty config runs.
 | `agentPreset` | `""` | Preset Telegram conversations are composed from; empty takes the deployment default. The preset supplies the tools |
 | `permissionPreset` | `""` | Permission preset Telegram runs under, from the deployment's own table; empty follows the deployment default |
 | `requireMentionInGroups` | `true` | In a group, answer only when @mentioned or replied to |
+| `screenshot.enabled` | `false` | Allow `/screenshot`. Off by default; macOS also needs Screen Recording permission |
 | `streaming.enabled` | `true` | Show the answer as it is written |
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
 | `streaming.placeholder` | `…` | Body shown under a tool-activity line before any text arrives |

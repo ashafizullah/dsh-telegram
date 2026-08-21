@@ -101,6 +101,17 @@ export const Config = Schema.object({
         'whose approval policy asks is what makes the approval buttons appear.',
     ),
 
+  screenshot: Schema.object({
+    enabled: Schema.boolean()
+      .default(false)
+      .description(
+        'Allow /screenshot. Off by default: a screen holds whatever happens to ' +
+          'be on it, and this is the one thing here that sends the machine\'s ' +
+          'own contents outward without the agent being involved. macOS also ' +
+          'needs Screen Recording permission for the harness process.',
+      ),
+  }),
+
   reconnect: Schema.object({
     baseDelayMs: Schema.natural().default(1000).description('First reconnect delay.'),
     maxDelayMs: Schema.natural().default(30_000).description('Longest reconnect delay.'),

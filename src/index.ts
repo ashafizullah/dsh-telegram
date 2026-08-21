@@ -42,6 +42,7 @@ import { BindingStore } from './session/bindings.js'
 import { RecoveryOffer } from './session/recovery.js'
 import { SessionRunner } from './session/runner.js'
 import { PermissionControl, matchPreset } from './session/permission.js'
+import { PHOTO_LIMIT_BYTES, Screenshotter } from './media/screenshot.js'
 import { ChatHistory } from './session/history.js'
 import { SessionPicker } from './session/picker.js'
 import { isUsableDirectory, resolveDirectory } from './session/workspaces.js'
@@ -422,6 +423,11 @@ async function start(
     logger,
   })
 
+  const screenshotter = new Screenshotter({ logger })
+  if (config.screenshot.enabled && !screenshotter.available) {
+    logger.warn(`[dsh-telegram] /screenshot is on but ${process.platform} has no capture tool`)
+  }
+
   const router = new UpdateRouter({
     chat: api,
     access,
@@ -430,6 +436,42 @@ async function start(
     recovery,
     sessions: sessionPicker,
     typing,
+    ...(config.screenshot.enabled
+      ? {
+          screen: {
+            async send(target) {
+              const shot = await screenshotter.take()
+
+              if (shot.kind === 'unsupported') {
+                return `Screenshots are not supported on ${shot.platform} yet.`
+              }
+              if (shot.kind === 'failed') {
+                return shot.reason === 'the harness has no Screen Recording permission'
+                  ? 'macOS has not given the harness Screen Recording permission. ' +
+                      'Grant it in System Settings → Privacy & Security → Screen Recording, ' +
+                      'then restart the harness.'
+                  : `The screenshot failed: ${shot.reason}`
+              }
+
+              // Over the photo limit it goes as a document, which Telegram
+              // takes up to 50 MB. A large display's PNG routinely is.
+              const asPhoto = shot.data.length <= PHOTO_LIMIT_BYTES
+              await api.uploadFile(
+                asPhoto ? 'sendPhoto' : 'sendDocument',
+                asPhoto ? 'photo' : 'document',
+                {
+                  chatId: target.chatId,
+                  data: shot.data,
+                  filename: shot.filename,
+                  contentType: 'image/png',
+                  ...(target.threadId !== undefined ? { threadId: target.threadId } : {}),
+                },
+              )
+              return undefined
+            },
+          },
+        }
+      : {}),
     ...(permission.available
       ? {
           permission: {
