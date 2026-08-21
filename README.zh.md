@@ -110,6 +110,7 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | `/model [名称]` | 查看模型、`/model list`，或切换到某一个 |
 | `/effort [强度]` | 查看或调整模型思考的深度 |
 | `/permission [名称]` | 查看或调整 Agent 在这里被允许做什么 |
+| `/diag` | 插件对自身的观察，以及最近的失败 |
 | `/screenshot` | 发送 harness 所在机器的屏幕截图 |
 | `/sessions` | 继续这个聊天里较早的一段对话 |
 | `/status` | 会话 ID、工作目录，以及是否已加载 |
@@ -313,6 +314,13 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 | `reconnect.maxDelayMs` | `30000` | 重连之间的最长延迟 |
 
 ## 诊断
+
+`/diag` 报告插件对自身的观察：连接状况、这个部署究竟组合了哪些 harness 接缝，以及
+最近二十件出错的事。
+
+接缝列表是其中最有用的部分。缺席的接缝能一眼解释一整类「它为什么不会做那个」，
+不需要任何人去猜——缺少 `agentPresets` 正是 Telegram agent 曾经到达模型时几乎没有
+工具的原因，而当时没有任何地方说出这件事。
 
 `ctx.logger` 写往部署所组合的任何输出端，而有些 profile 一个都没有组合——因此一
 个只把失败写进日志的插件，实际上是沉默的。本插件还会在每次状态变化时把自身状态

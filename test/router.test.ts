@@ -37,6 +37,12 @@ async function build(
     permission?: boolean
     /** Set false to run below Bot API 10.1, where a table is just pipes. */
     richMessages?: boolean
+    /** Set false to run without diagnostics. */
+    diagnostics?: boolean
+    /** Seams to report as composed; the rest report as absent. */
+    seams?: string[]
+    /** Failures to report. */
+    failures?: { at: string; level: string; message: string }[]
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
@@ -153,6 +159,20 @@ async function build(
     ...(options.typing === false ? {} : { typing }),
     ...(options.workspace === false ? {} : { workspace }),
     ...(options.models === false ? {} : { models }),
+    ...(options.diagnostics === false
+      ? {}
+      : {
+          diagnostics: {
+            report: async () => ({
+              status: [{ label: 'Bot', value: '@my_bot' }],
+              seams: ['agents', 'agentPresets', 'llm'].map((name) => ({
+                name,
+                present: (options.seams ?? ['agents', 'llm']).includes(name),
+              })),
+              failures: options.failures ?? [],
+            }),
+          },
+        }),
     ...(options.effort === false ? {} : { effort: effortSeam }),
     ...(options.permission === false ? {} : { permission: permissionSeam }),
     textCapture,
@@ -598,6 +618,63 @@ describe('UpdateRouter — /model', () => {
     const { router, said } = await build({ models: false })
     await router.handle(message('/model list'))
     expect(said[0]).toContain('does not allow')
+  })
+})
+
+describe('UpdateRouter — /diag', () => {
+  it('reports the connection', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/diag'))
+    expect(said[0]).toContain('@my_bot')
+  })
+
+  it('names which harness seams are actually composed', async () => {
+    // The most useful line in the report: an absent seam explains a whole
+    // class of "why does it not do that". A missing agentPresets is why
+    // Telegram agents once reached the model with almost no tools.
+    const { router, said } = await build()
+    await router.handle(message('/diag'))
+
+    expect(said[0]).toContain('| agents | ✅ |')
+    expect(said[0]).toContain('| agentPresets | ❌ |')
+  })
+
+  it('says so plainly when nothing has gone wrong', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/diag'))
+    expect(said[0]).toContain('Nothing has gone wrong')
+  })
+
+  it('lists recent failures, newest first, with the level marked', async () => {
+    const { router, said } = await build({
+      failures: [
+        { at: '2026-08-21T10:00:00.000Z', level: 'error', message: 'the harness is gone' },
+        { at: '2026-08-21T09:59:00.000Z', level: 'warn', message: 'a slow download' },
+      ],
+    })
+    await router.handle(message('/diag'))
+
+    expect(said[0]).toContain('🔴 the harness is gone')
+    expect(said[0]).toContain('🟠 a slow download')
+    expect(said[0]).toContain('**Recent failures** (2)')
+  })
+
+  it('falls back to lines below Bot API 10.1', async () => {
+    const { router, said } = await build({ richMessages: false })
+    await router.handle(message('/diag'))
+    expect(said[0]).toContain('<b>Bot</b>')
+  })
+
+  it('says so where the deployment keeps none', async () => {
+    const { router, said } = await build({ diagnostics: false })
+    await router.handle(message('/diag'))
+    expect(said[0]).toContain('keeps no diagnostics')
+  })
+
+  it('refuses an unauthorised /diag, like any other command', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/diag', STRANGER))
+    expect(said[0]).toContain('not allowed')
   })
 })
 

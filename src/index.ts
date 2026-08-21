@@ -19,6 +19,7 @@
 
 import { homedir } from 'node:os'
 import { stat } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -43,6 +44,7 @@ import { RecoveryOffer } from './session/recovery.js'
 import { SessionRunner } from './session/runner.js'
 import { PermissionControl, matchPreset } from './session/permission.js'
 import { PHOTO_LIMIT_BYTES, Screenshotter } from './media/screenshot.js'
+import { FailureLog, recordingLogger } from './failures.js'
 import { ChatHistory } from './session/history.js'
 import { SessionPicker } from './session/picker.js'
 import { isUsableDirectory, resolveDirectory } from './session/workspaces.js'
@@ -118,15 +120,23 @@ interface Disposable {
  * @param config - resolved plugin configuration.
  */
 export function apply(ctx: PluginContext, config: TelegramConfig): void {
-  const logger = ctx.logger('dsh-telegram')
+  // Wrapped rather than replaced: whatever sink the deployment composed still
+  // gets everything, and this keeps a copy of the parts worth looking back at.
+  // Several profiles compose no sink at all, which is how this plugin's faults
+  // came to be found by noticing odd behaviour in a chat rather than by
+  // reading a log.
+  // One registry for the plugin's lifetime, created first because everything
+  // written after it — files, log lines, chat messages — passes through it.
+  const secrets = new SecretRegistry()
+
+  const failures = new FailureLog({
+    file: join(dataDirectory(), 'failures.json'),
+    redact: secrets.redactor(),
+  })
+  const logger = recordingLogger(ctx.logger('dsh-telegram'), failures)
 
   let live = config
   let abort: AbortController | undefined
-
-  // One registry for the plugin's lifetime: the token is registered the moment
-  // it is resolved, and every file, log line, and chat message written after
-  // that passes through it.
-  const secrets = new SecretRegistry()
   const status = new StatusFile(join(dataDirectory(), 'status.json'), secrets.redactor())
 
   /** (Re)open the connection under the configuration standing right now. */
@@ -134,7 +144,7 @@ export function apply(ctx: PluginContext, config: TelegramConfig): void {
     abort?.abort()
     abort = new AbortController()
     const signal = abort.signal
-    void start(ctx, live, logger, signal, status, secrets).catch((error: unknown) => {
+    void start(ctx, live, logger, signal, status, secrets, failures).catch((error: unknown) => {
       if (signal.aborted) return
       logger.error('[dsh-telegram] failed to start', error)
       void status.publish('failed', { detail: describeError(error) })
@@ -211,6 +221,7 @@ async function start(
   signal: AbortSignal,
   status: StatusFile,
   secrets: SecretRegistry,
+  failures: FailureLog,
 ): Promise<void> {
   if (!config.enabled) {
     logger.info('[dsh-telegram] disabled; not connecting')
@@ -423,6 +434,21 @@ async function start(
     logger,
   })
 
+  const startedAt = Date.now()
+
+  /**
+   * Which harness services this deployment composed.
+   *
+   * The single most useful line in `/diag`: an absent seam explains a whole
+   * class of "why does it not do that" without anyone having to guess. A
+   * missing `agentPresets` is why Telegram agents once reached the model with
+   * almost no tools, and nothing said so anywhere.
+   */
+  const seamReport = () =>
+    (['agents', 'agentPresets', 'permissionPresets', 'sessions', 'llm', 'attachments', 'userQuestions'] as const).map(
+      (name) => ({ name, present: ctx.get(name) !== undefined }),
+    )
+
   const screenshotter = new Screenshotter({ logger })
   if (config.screenshot.enabled && !screenshotter.available) {
     logger.warn(`[dsh-telegram] /screenshot is on but ${process.platform} has no capture tool`)
@@ -436,6 +462,24 @@ async function start(
     recovery,
     sessions: sessionPicker,
     typing,
+    diagnostics: {
+      async report() {
+        const uptime = Math.floor((Date.now() - startedAt) / 1000)
+        return {
+          status: [
+            { label: 'Bot', value: me.username ? `@${me.username}` : String(me.id) },
+            { label: 'Plugin', value: PLUGIN_VERSION },
+            { label: 'Uptime', value: formatUptime(uptime) },
+            { label: 'Streaming', value: config.streaming.enabled ? 'on' : 'off' },
+            { label: 'Attachments', value: config.media.enabled ? 'on' : 'off' },
+            { label: 'Screenshots', value: config.screenshot.enabled ? 'on' : 'off' },
+            { label: 'Groups', value: config.requireMentionInGroups ? 'mention required' : 'open' },
+          ],
+          seams: seamReport(),
+          failures: failures.recent(),
+        }
+      },
+    },
     ...(config.screenshot.enabled
       ? {
           screen: {
@@ -558,6 +602,8 @@ async function start(
     () => {
       for (const dispose of teardown) dispose()
       pending.dispose()
+      void failures.flush()
+      failures.dispose()
       typing.dispose()
       extractor.dispose()
       textCapture.dispose()
@@ -814,6 +860,31 @@ function buildModelControl(options: {
 
     clear: (target) => options.store.clear(target),
   }
+}
+
+/**
+ * This plugin's version, for a report that has to say which build is running.
+ *
+ * Read from the manifest rather than hard-coded, so it cannot drift from the
+ * package it was published as.
+ */
+const PLUGIN_VERSION: string = (() => {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+    ) as { version?: string }
+    return manifest.version ?? 'unknown'
+  } catch {
+    return 'unknown'
+  }
+})()
+
+/** Seconds as something readable at a glance. */
+function formatUptime(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  const hours = Math.floor(seconds / 3600)
+  return hours < 24 ? `${hours}h ${Math.floor((seconds % 3600) / 60)}m` : `${Math.floor(hours / 24)}d ${hours % 24}h`
 }
 
 /**

@@ -123,6 +123,22 @@ export interface PermissionControlSeam {
   clear(target: ChatTarget): Promise<void>
 }
 
+/** What `/diag` reports. */
+export interface DiagnosticsSource {
+  report(): Promise<{
+    /** Connection facts, as rows. */
+    readonly status: readonly StatusRow[]
+    /**
+     * Which harness services this deployment actually composed.
+     *
+     * The most useful line in the report: a seam that is absent explains a
+     * whole class of "why does it not do that" without anyone having to guess.
+     */
+    readonly seams: readonly { readonly name: string; readonly present: boolean }[]
+    readonly failures: readonly { at: string; level: string; message: string }[]
+  }>
+}
+
 /** Capturing the screen and putting it in the chat. */
 export interface ScreenControl {
   /**
@@ -187,6 +203,8 @@ export interface UpdateRouterOptions {
   readonly permission?: PermissionControlSeam
   /** Takes and sends a picture of the screen. Absent means screenshots are off. */
   readonly screen?: ScreenControl
+  /** What the plugin can see about itself, for `/diag`. */
+  readonly diagnostics?: DiagnosticsSource
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
@@ -395,6 +413,9 @@ export class UpdateRouter {
       case 'permission':
         return await this.onPermission(target, args)
 
+      case 'diag':
+        return await this.onDiagnostics(target)
+
       case 'screenshot':
         return await this.onScreenshot(target)
 
@@ -434,6 +455,76 @@ export class UpdateRouter {
     } finally {
       release?.()
     }
+  }
+
+  /**
+   * Report what this plugin can see about itself.
+   *
+   * Exists because several profiles compose no log sink at all, so a plugin
+   * that only logs its failures is silent about them. Every fault found here
+   * so far was found by someone noticing odd behaviour in a chat and asking —
+   * the seam list in particular would have shown at a glance that Telegram
+   * agents were joining no preset, and therefore had almost no tools.
+   *
+   * @param target - the conversation asking.
+   */
+  private async onDiagnostics(target: ChatTarget): Promise<void> {
+    const diagnostics = this.options.diagnostics
+    if (!diagnostics) {
+      return await this.say(target, 'This deployment keeps no diagnostics.')
+    }
+
+    const report = await diagnostics.report()
+    const seams = report.seams
+      .map((seam) => `| ${escapeCell(seam.name)} | ${seam.present ? '✅' : '❌'} |`)
+      .join('\n')
+
+    const failures =
+      report.failures.length === 0
+        ? '_Nothing has gone wrong since the last restart._'
+        : report.failures
+            .map(
+              (failure) =>
+                `- \`${failure.at.replace('T', ' ').slice(0, 19)}\` ` +
+                `${failure.level === 'error' ? '🔴' : '🟠'} ${failure.message}`,
+            )
+            .join('\n')
+
+    const markdown = [
+      '**Connection**',
+      '',
+      `| | |\n| --- | --- |\n${report.status
+        .map((row) => `| ${escapeCell(row.label)} | ${escapeCell(row.value)} |`)
+        .join('\n')}`,
+      '',
+      '**Harness seams**',
+      '',
+      `| | |\n| --- | --- |\n${seams}`,
+      '',
+      `**Recent failures** (${report.failures.length})`,
+      '',
+      failures,
+    ].join('\n')
+
+    if (this.options.chat.sendRichMessage) {
+      try {
+        await this.options.chat.sendRichMessage({
+          chatId: target.chatId,
+          markdown,
+          ...(target.threadId !== undefined ? { threadId: target.threadId } : {}),
+        })
+        return
+      } catch (error) {
+        this.logger.warn('[dsh-telegram] could not send the diagnostics', error)
+      }
+    }
+
+    await this.say(
+      target,
+      report.status
+        .map((row) => `<b>${escapeHtml(row.label)}</b> <code>${escapeHtml(row.value)}</code>`)
+        .join('\n'),
+    )
   }
 
   /**

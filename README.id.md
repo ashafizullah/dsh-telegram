@@ -121,6 +121,7 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/model [apa]` | Lihat model, `/model list`, atau ganti ke salah satu |
 | `/effort [level]` | Lihat atau ganti seberapa dalam model berpikir |
 | `/permission [nama]` | Lihat atau ganti apa yang boleh dilakukan agent di sini |
+| `/diag` | Apa yang plugin ini tahu tentang dirinya, plus kegagalan terakhir |
 | `/screenshot` | Kirim tangkapan layar mesin tempat harness jalan |
 | `/sessions` | Lanjutkan percakapan lama dari chat ini |
 | `/status` | ID sesi, working directory, dan apakah sedang dimuat |
@@ -376,6 +377,15 @@ masalah.
 | `reconnect.maxDelayMs` | `30000` | Jeda terpanjang antar percobaan sambung ulang |
 
 ## Diagnostik
+
+`/diag` melaporkan apa yang plugin ini tahu tentang dirinya sendiri: koneksinya,
+seam harness mana saja yang benar-benar dikomposisi deployment-mu, dan dua puluh
+hal terakhir yang gagal.
+
+Daftar seam itu bagian yang paling berguna. Seam yang absen menjelaskan satu
+kelas utuh pertanyaan "kenapa dia tidak bisa begitu" tanpa siapa pun perlu
+menebak — `agentPresets` yang hilang itulah sebabnya agent Telegram dulu sampai
+ke model nyaris tanpa tool, dan tidak ada satu pun tempat yang mengatakannya.
 
 `ctx.logger` menulis ke mana pun deployment-mu mengarahkannya, dan ada beberapa
 profile yang tidak mengarahkannya ke mana-mana — artinya plugin yang cuma

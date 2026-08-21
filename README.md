@@ -114,6 +114,7 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/model [what]` | Show the model, `/model list`, or switch to one |
 | `/effort [level]` | Show or change how hard the model thinks |
 | `/permission [name]` | Show or change what the agent may do here |
+| `/diag` | What the plugin can see about itself, and recent failures |
 | `/screenshot` | Send a picture of the harness machine's screen |
 | `/sessions` | Pick up an earlier conversation from this chat |
 | `/status` | Session id, working directory, and whether it is loaded |
@@ -357,6 +358,15 @@ Every field has a working default; an empty config runs.
 | `reconnect.maxDelayMs` | `30000` | Longest delay between reconnect attempts |
 
 ## Diagnostics
+
+`/diag` reports what the plugin can see about itself: the connection, which
+harness seams this deployment actually composed, and the last twenty things
+that went wrong.
+
+The seam list is the useful part. An absent seam explains a whole class of "why
+does it not do that" without anyone having to guess — a missing `agentPresets`
+is why Telegram agents once reached the model with almost no tools, and nothing
+anywhere said so.
 
 `ctx.logger` reaches whatever sink the deployment composed, and several profiles
 compose none — so a plugin that only logs its failures is silent about them.
