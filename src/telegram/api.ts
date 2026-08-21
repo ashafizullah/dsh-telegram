@@ -36,6 +36,19 @@ const BACKOFF_MS = [500, 1500, 4000] as const
 /** Statuses worth retrying: rate limit, and Telegram's own transient faults. */
 const RETRYABLE = new Set([429, 500, 502, 503, 504])
 
+/**
+ * Methods safe to repeat after a transport failure.
+ *
+ * A dropped connection leaves no way to know whether the request arrived, so
+ * repeating a send could post the same message twice. These are all reads or
+ * idempotent, so repeating one costs nothing and rescues the call.
+ *
+ * This matters most for `getFile`: it runs while the long poll holds its own
+ * connection open, so it is the call most likely to need a fresh one, and a
+ * single flaky connect was turning a sent screenshot into an error.
+ */
+const IDEMPOTENT = new Set(['getMe', 'getFile', 'getUpdates', 'deleteWebhook'])
+
 /** A Bot API call that failed, with the token stripped from every field. */
 export class TelegramApiError extends Error {
   constructor(
@@ -355,7 +368,7 @@ export class TelegramApi {
         return await this.request<T>(method, body, options)
       } catch (error) {
         lastError = error
-        const delay = retryDelay(error, attempt)
+        const delay = retryDelay(error, attempt, IDEMPOTENT.has(method))
         if (delay === undefined) throw error
         await this.sleep(delay, options.signal)
       }
@@ -404,9 +417,8 @@ export class TelegramApi {
   /** Wrap any thrown value as a redacted TelegramApiError. */
   private normalize(error: unknown, method: string): TelegramApiError {
     if (error instanceof TelegramApiError) return error
-    const reason = error instanceof Error ? error.message : String(error)
     return new TelegramApiError(
-      `telegram ${method} failed: ${this.redact(reason)}`,
+      `telegram ${method} failed: ${this.redact(describeCause(error))}`,
       undefined,
       undefined,
     )
@@ -440,11 +452,23 @@ function parseEnvelope(text: string, method: string): Envelope {
 /**
  * How long to wait before retrying, or undefined when the failure is final.
  * A 429 names its own delay; everything else uses fixed backoff.
+ *
+ * @param repeatable - whether repeating this method is safe when the transport
+ *   failed and the request's fate is unknown.
  */
-function retryDelay(error: unknown, attempt: number): number | undefined {
+function retryDelay(error: unknown, attempt: number, repeatable: boolean): number | undefined {
   if (!(error instanceof TelegramApiError)) return undefined
-  if (error.code === undefined || !RETRYABLE.has(error.code)) return undefined
   if (attempt >= MAX_RETRIES - 1) return undefined
+
+  // No status means the request never got an answer: a refused connection, a
+  // dropped socket, a name that would not resolve. The poll loop already
+  // survives those; an individual call did not, so one flaky connect surfaced
+  // to the user as a failure.
+  if (error.code === undefined) {
+    return repeatable ? (BACKOFF_MS[attempt] ?? BACKOFF_MS[BACKOFF_MS.length - 1]) : undefined
+  }
+
+  if (!RETRYABLE.has(error.code)) return undefined
 
   if (error.retryAfterSeconds !== undefined) return error.retryAfterSeconds * 1000
 
@@ -453,6 +477,36 @@ function retryDelay(error: unknown, attempt: number): number | undefined {
   if (error.code === 429) return 1000
 
   return BACKOFF_MS[attempt] ?? BACKOFF_MS[BACKOFF_MS.length - 1]
+}
+
+/**
+ * One readable line from an error and everything underneath it.
+ *
+ * Node's fetch reports every transport failure as the same three words —
+ * `fetch failed` — and puts what actually happened in `cause`: a refused
+ * connection, an unresolved name, an expired certificate, a timeout. Reporting
+ * only the top layer turns four distinct problems into one unactionable
+ * sentence, which is exactly how far a diagnosis gets on it.
+ *
+ * @param error - any thrown value.
+ * @returns the message chain, outermost first.
+ */
+export function describeCause(error: unknown): string {
+  const chain: string[] = []
+  let current: unknown = error
+
+  // Bounded: a cause chain is normally two or three deep, and a cyclic one
+  // must not become an infinite loop inside an error handler.
+  for (let depth = 0; depth < 5 && current !== undefined && current !== null; depth += 1) {
+    const message = current instanceof Error ? current.message : String(current)
+    const code = (current as { code?: unknown }).code
+    const labelled = typeof code === 'string' && !message.includes(code) ? `${message} (${code})` : message
+
+    if (labelled !== '' && !chain.includes(labelled)) chain.push(labelled)
+    current = current instanceof Error ? current.cause : undefined
+  }
+
+  return chain.length > 0 ? chain.join(': ') : String(error)
 }
 
 /** Whether a failure means "the edit changed nothing", which is not a failure. */

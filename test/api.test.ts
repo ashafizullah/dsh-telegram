@@ -189,3 +189,74 @@ describe('TelegramApi — resilience', () => {
     expect(String(error)).toContain('<redacted>')
   })
 })
+
+describe('TelegramApi — transport failures', () => {
+  /** An api whose fetch fails a given number of times, then succeeds. */
+  function flaky(failures: number, cause?: unknown) {
+    let attempts = 0
+    const fetchImpl = (async () => {
+      attempts += 1
+      if (attempts <= failures) {
+        const error = new Error('fetch failed')
+        if (cause !== undefined) (error as { cause?: unknown }).cause = cause
+        throw error
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, result: { file_id: 'f', file_path: 'a.jpg' } }),
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    const api = new TelegramApi({
+      token: TOKEN,
+      baseUrl: 'https://api.telegram.org',
+      timeoutMs: 1000,
+      fetchImpl,
+      sleep: async () => undefined,
+    })
+    return { api, attempts: () => attempts }
+  }
+
+  it('retries a read whose connection failed', async () => {
+    // getFile runs while the long poll holds its own connection, so it is the
+    // call most likely to need a fresh one — and a single flaky connect was
+    // turning a sent screenshot into an error.
+    const { api, attempts } = flaky(1)
+    // getFile returns the Bot API shape verbatim, which is what MediaCollector reads.
+    await expect(api.getFile('abc')).resolves.toMatchObject({ file_path: 'a.jpg' })
+    expect(attempts()).toBe(2)
+  })
+
+  it('gives up once the retries are spent', async () => {
+    const { api } = flaky(99)
+    await expect(api.getFile('abc')).rejects.toThrow(/fetch failed/)
+  })
+
+  it('never repeats a send, which could post the same message twice', async () => {
+    const { api, attempts } = flaky(1)
+    await expect(api.sendMessage({ chatId: '1', html: 'hi' })).rejects.toThrow()
+    expect(attempts()).toBe(1)
+  })
+
+  it('reports what actually failed, not just that fetch did', async () => {
+    // Node reports every transport failure as the same three words and puts
+    // the reason in `cause`; keeping only the top layer says nothing.
+    const cause = Object.assign(new Error('connect ECONNREFUSED 149.154.167.220:443'), {
+      code: 'ECONNREFUSED',
+    })
+    const { api } = flaky(99, cause)
+
+    const error = await api.getFile('abc').catch((e: unknown) => e)
+    expect(String(error)).toContain('ECONNREFUSED')
+  })
+
+  it('still redacts the token when the cause quotes the url', async () => {
+    const cause = new Error(`connect failed for https://api.telegram.org/bot${TOKEN}/getFile`)
+    const { api } = flaky(99, cause)
+
+    const error = await api.getFile('abc').catch((e: unknown) => e)
+    expect(String(error)).not.toContain(TOKEN)
+    expect(String(error)).toContain('<redacted>')
+  })
+})

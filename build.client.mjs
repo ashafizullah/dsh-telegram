@@ -18,7 +18,8 @@
  */
 
 import { build } from 'esbuild'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 
 /** The module id the shell registers this bundle under: the package name. */
 const { name: PACKAGE_NAME } = JSON.parse(await readFile('./package.json', 'utf8'))
@@ -56,6 +57,10 @@ const result = await build({
 
 const bundled = result.outputFiles[0].text
 
+// Created here rather than assumed: the tests run this script directly, so on
+// a fresh clone — where lib/ is gitignored and tsc has not run — the directory
+// does not exist yet.
+await mkdir(dirname(OUTPUT), { recursive: true })
 await writeFile(OUTPUT, envelope(PACKAGE_NAME, bundled), 'utf8')
 process.stdout.write(`client bundle: ${OUTPUT} (${(bundled.length / 1024).toFixed(1)} kB)\n`)
 
