@@ -19,6 +19,7 @@ import type { ChatTarget } from '../interact/surface.js'
 import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
 
+import { describeToolCall } from './activity.js'
 import { RichReplyStream } from './rich-stream.js'
 import type { RichChat } from './rich-stream.js'
 
@@ -39,6 +40,11 @@ export type SessionEvent =
         readonly message: { readonly content?: readonly { type: string; text?: string }[] }
       }
     }
+  | {
+      readonly type: 'tool/call'
+      readonly data: { readonly turn: number; readonly name: string; readonly arguments?: string }
+    }
+  | { readonly type: 'tool/result'; readonly data: { readonly turn: number } }
   | { readonly type: 'turn/end'; readonly data: { readonly turn: number } }
   | { readonly type: string; readonly data?: unknown }
 
@@ -89,6 +95,10 @@ export class TurnBridge {
           return await this.onChunk(sessionId, event as never)
         case 'assistant/message':
           return this.onMessage(sessionId, event as never)
+        case 'tool/call':
+          return await this.onToolCall(sessionId, event as never)
+        case 'tool/result':
+          return await this.onToolResult(sessionId, event as never)
         case 'turn/end':
           return await this.onTurnEnd(sessionId, event as { data: { turn: number } })
         default:
@@ -146,6 +156,35 @@ export class TurnBridge {
     if (event.data.chunk.type !== 'text-delta') return
 
     await entry.stream.append(event.data.chunk.text ?? '')
+  }
+
+  /**
+   * Say which tool is running.
+   *
+   * These events were previously dropped along with the reasoning deltas, on
+   * the grounds that neither is an answer. That is true of the content and
+   * wrong about the need: during a long tool call it is the only sign the
+   * agent is alive.
+   */
+  private async onToolCall(
+    sessionId: string,
+    event: { data: { turn: number; name: string; arguments?: string } },
+  ): Promise<void> {
+    const entry = this.active.get(sessionId)
+    if (!entry || entry.turn !== event.data.turn) return
+
+    await entry.stream.showActivity(describeToolCall(event.data.name, event.data.arguments))
+  }
+
+  /** Clear the activity line once the tool has answered. */
+  private async onToolResult(
+    sessionId: string,
+    event: { data: { turn: number } },
+  ): Promise<void> {
+    const entry = this.active.get(sessionId)
+    if (!entry || entry.turn !== event.data.turn) return
+
+    await entry.stream.showActivity(undefined)
   }
 
   /** Record the authoritative text for the turn. */

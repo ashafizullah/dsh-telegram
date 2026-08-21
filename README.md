@@ -168,6 +168,21 @@ Telegram offers two mechanisms, and they are not interchangeable:
 
 Both end with one permanent rich message.
 
+While the agent works, the running tool is shown above the reply in a
+`<tg-thinking>` block:
+
+```
+▸ bash: npm test
+
+Here is what I found so far…
+```
+
+Telegram accepts that block in a draft and nowhere else, which matches its
+lifetime exactly — it disappears when the turn is persisted, so the finished
+reply carries the answer rather than the scaffolding that produced it. It is a
+single clipped line: a tool call's arguments can be an entire file, and the
+point is knowing the agent is alive, not reading a transcript.
+
 Access is checked before anything else, so no unauthorised text reaches the
 agent — not even a command.
 
@@ -175,7 +190,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 370 tests
+pnpm test          # 387 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

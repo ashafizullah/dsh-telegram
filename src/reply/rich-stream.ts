@@ -26,6 +26,7 @@ import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
 
 import { splitMarkdown } from './split-markdown.js'
+import { thinkingBlock } from './activity.js'
 
 /** Telegram's rich-message character cap. */
 export const RICH_MESSAGE_LIMIT = 32_768
@@ -107,6 +108,14 @@ export class RichReplyStream {
   private buffer = ''
   /** What the last frame showed, so an unchanged frame is skipped. */
   private shown = ''
+  /**
+   * What the agent is doing, shown above the text while it works.
+   *
+   * Draft-only: Telegram accepts the thinking block in a draft and nowhere
+   * else, and the finished reply should carry the answer, not the scaffolding
+   * that produced it.
+   */
+  private activity: string | undefined
   /** The group placeholder awaiting its finished reply. */
   private placeholderId: number | undefined
 
@@ -148,6 +157,20 @@ export class RichReplyStream {
       })
       this.placeholderId = sent.messageId
     })
+  }
+
+  /**
+   * Say what the agent is doing, above whatever text has arrived.
+   *
+   * @param activity - an escaped one-line description, or undefined to clear.
+   */
+  async showActivity(activity: string | undefined): Promise<void> {
+    if (this.finished || !this.options.canDraft) return
+    if (this.activity === activity) return
+
+    this.activity = activity
+    if (!this.started) return await this.start()
+    await this.schedule()
   }
 
   /**
@@ -226,9 +249,12 @@ export class RichReplyStream {
 
   /** Show one draft frame, remembering it so the heartbeat can repeat it. */
   private async draft(markdown: string): Promise<void> {
+    const thinking = thinkingBlock(this.activity)
+    const composed = thinking === '' ? markdown : `${thinking}\n\n${markdown}`
+
     // A draft cannot exceed the message cap either; the tail is what the user
     // is watching, and the whole text lands when the turn is persisted.
-    const frame = markdown.length > this.limit ? markdown.slice(-this.limit) : markdown
+    const frame = composed.length > this.limit ? composed.slice(-this.limit) : composed
 
     await this.chat.sendRichMessageDraft({
       chatId: this.target.chatId,
@@ -257,10 +283,13 @@ export class RichReplyStream {
     }, due)
   }
 
-  /** Send the current buffer as a draft frame, if it moved. */
+  /** Send the current buffer as a draft frame, if anything moved. */
   private async frame(): Promise<void> {
-    if (this.finished || this.buffer === '' || this.buffer === this.shown) return
-    await this.draft(this.buffer)
+    if (this.finished) return
+    // The activity line alone is worth a frame: during a long tool call it is
+    // the only thing that changes, and it is the whole point of showing it.
+    const body = this.buffer === '' ? this.placeholder : this.buffer
+    await this.draft(body)
   }
 
   /**

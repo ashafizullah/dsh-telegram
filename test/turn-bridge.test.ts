@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { TurnBridge } from '../src/reply/turn-bridge.js'
 import type { SessionEvent } from '../src/reply/turn-bridge.js'
 import { canStreamTo } from '../src/reply/rich-stream.js'
+import { describeToolCall, thinkingBlock } from '../src/reply/activity.js'
 import type { RichChat } from '../src/reply/rich-stream.js'
 
 /** A Bot API stand-in recording every rich call the bridge makes. */
@@ -272,5 +273,128 @@ describe('canStreamTo', () => {
 
   it('does not stream to a group with streaming off either', () => {
     expect(canStreamTo('-1001234567890', false)).toBe(false)
+  })
+})
+
+describe('describeToolCall', () => {
+  it('names the tool when its arguments say nothing useful', () => {
+    expect(describeToolCall('todo_write', '{}')).toBe('todo_write')
+  })
+
+  it('shows the command a shell tool is about to run', () => {
+    expect(describeToolCall('bash', '{"command":"npm test"}')).toBe('bash: npm test')
+  })
+
+  it('shows the file a read touches', () => {
+    expect(describeToolCall('read', '{"file_path":"src/index.ts"}')).toBe('read: src/index.ts')
+  })
+
+  it('survives arguments that are still streaming in, and so are not json', () => {
+    // Tool arguments arrive as deltas, so mid-call they are routinely partial.
+    expect(describeToolCall('bash', '{"command":"npm te')).toBe('bash')
+  })
+
+  it('survives absent arguments', () => {
+    expect(describeToolCall('bash', undefined)).toBe('bash')
+  })
+
+  it('keeps the line to one line, even for a multi-line command', () => {
+    expect(describeToolCall('bash', '{"command":"one\\ntwo\\nthree"}')).toBe('bash: one')
+  })
+
+  it('clips a command too long to read at a glance', () => {
+    const long = describeToolCall('bash', JSON.stringify({ command: 'x'.repeat(300) }))
+    expect(long.length).toBeLessThanOrEqual(80)
+    expect(long).toMatch(/…$/)
+  })
+
+  it('escapes markup, since a command is not markup', () => {
+    expect(describeToolCall('bash', '{"command":"echo <b> && true"}')).toContain('&lt;b&gt;')
+  })
+})
+
+describe('thinkingBlock', () => {
+  it('wraps an activity line in the tag Telegram renders as thinking', () => {
+    expect(thinkingBlock('bash: npm test')).toBe('<tg-thinking>bash: npm test</tg-thinking>')
+  })
+
+  it('produces nothing when there is no activity', () => {
+    expect(thinkingBlock(undefined)).toBe('')
+    expect(thinkingBlock('')).toBe('')
+  })
+})
+
+describe('TurnBridge — showing what the agent is doing', () => {
+  const toolCall = (name: string, args: string): SessionEvent => ({
+    type: 'tool/call',
+    data: { turn: 1, name, arguments: args },
+  })
+
+  it('shows the running tool above the reply', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
+
+    expect(chat.frame()).toContain('<tg-thinking>bash: npm test</tg-thinking>')
+  })
+
+  it('updates the line as the agent moves to the next tool', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', toolCall('read', '{"file_path":"a.ts"}'))
+    await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
+
+    expect(chat.frame()).toContain('bash: npm test')
+    expect(chat.frame()).not.toContain('a.ts')
+  })
+
+  it('clears the line once the tool answers', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
+    await bridge.handle('S', { type: 'tool/result', data: { turn: 1 } })
+
+    expect(chat.frame()).not.toContain('tg-thinking')
+  })
+
+  it('keeps the reply text alongside the activity line', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', delta('Here is what I found'))
+    await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
+
+    expect(chat.frame()).toContain('Here is what I found')
+    expect(chat.frame()).toContain('tg-thinking')
+  })
+
+  it('never puts the activity line in the persisted reply', async () => {
+    // The block is accepted only in a draft, and the finished reply should
+    // carry the answer rather than the scaffolding that produced it.
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
+    await bridge.handle('S', delta('done'))
+    await bridge.handle('S', end)
+
+    expect(chat.sent).toEqual(['done'])
+  })
+
+  it('ignores tool events from another turn', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', {
+      type: 'tool/call',
+      data: { turn: 9, name: 'bash', arguments: '{}' },
+    })
+
+    expect(chat.frame()).not.toContain('tg-thinking')
+  })
+
+  it('shows nothing in a group, which has no draft to show it in', async () => {
+    const { bridge, chat } = build({ group: true })
+    await bridge.handle('S', start)
+    await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
+
+    expect(chat.drafts).toHaveLength(0)
   })
 })
