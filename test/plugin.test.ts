@@ -117,7 +117,11 @@ function fakeContext() {
       return () => disposeEffect?.()
     },
     inject(names: readonly string[], callback: (scope: unknown) => void) {
-      if (names.every((service) => services.has(service))) callback(ctx)
+      // Cordis runs the callback only once every named service exists, and
+      // hands it a scope of its own whose effects unwind with it.
+      if (names.every((service) => services.has(service))) {
+        callback({ ...ctx, effect: (run: () => unknown) => void run() })
+      }
       return { dispose: () => undefined }
     },
   }
@@ -357,6 +361,19 @@ describe('apply — settings namespace', () => {
     await vi.waitFor(() => expect(bot.of('getMe').length).toBe(2))
 
     harness.stop()
+  })
+
+  it('opens exactly one connection at boot, not one per configuration source', async () => {
+    const harness = fakeContext()
+    harness.withSettings()
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(bot.of('getUpdates').length).toBeGreaterThan(0))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    harness.stop()
+
+    // Adopting a resolved value equal to the composed one must not reconnect.
+    expect(bot.of('getMe')).toHaveLength(1)
   })
 
   it('runs on a profile with no settings provider at all', async () => {

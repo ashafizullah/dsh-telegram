@@ -4,11 +4,17 @@
  * The harness ships bilingual, so a page that only speaks English reads as
  * half-finished next to the built-in sections. Both locales are kept in one
  * file so a new string cannot be added to one and forgotten in the other.
+ *
+ * The dictionary keys are `en` and `zh` — the shell's own tags, not BCP 47.
+ * A dictionary filed under `en-US` matches nothing, and `ctx.locale.bind`
+ * answers an unresolved key with the key itself, so the page renders the word
+ * "heading" where its heading should be. `test/client-bundle.test.ts` pins the
+ * tags for that reason.
  */
 
 /** Every string the page renders, keyed by the locale the shell selects. */
 export const locales = {
-  'en-US': {
+  en: {
     nav: 'Telegram',
     heading: 'Telegram',
     subheading: 'Talk to the agent from Telegram, with real formatting and answerable questions.',
@@ -59,7 +65,7 @@ export const locales = {
     saveFailed: 'That change was not saved: {reason}',
   },
 
-  'zh-CN': {
+  zh: {
     nav: 'Telegram',
     heading: 'Telegram',
     subheading: '在 Telegram 里与 Agent 对话，保留完整格式，并可直接回答提问。',
@@ -111,7 +117,7 @@ export const locales = {
 } as const
 
 /** Keys the page may ask for; a typo becomes a type error rather than a blank. */
-export type LocaleKey = keyof (typeof locales)['en-US']
+export type LocaleKey = keyof (typeof locales)['en']
 
 /** Translate one key, used where a real locale binding is not available. */
 export type Translate = (key: LocaleKey, params?: Record<string, unknown>) => string

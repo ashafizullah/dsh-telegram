@@ -94,44 +94,62 @@ interface Disposable {
 export function apply(ctx: PluginContext, config: TelegramConfig): void {
   const logger = ctx.logger('dsh-telegram')
 
+  let live = config
+  let abort: AbortController | undefined
+
+  /** (Re)open the connection under the configuration standing right now. */
+  const run = () => {
+    abort?.abort()
+    abort = new AbortController()
+    const signal = abort.signal
+    void start(ctx, live, logger, signal).catch((error: unknown) => {
+      if (!signal.aborted) logger.error('[dsh-telegram] failed to start', error)
+    })
+  }
+
+  ctx.effect(() => {
+    run()
+    return () => abort?.abort()
+  }, 'dsh-telegram: connection')
+
   // Registering the namespace is what puts this plugin in front of a
   // configuration UI at all, and it happens even when the plugin is disabled —
   // otherwise the one screen that could re-enable it would have nothing to
-  // show. Absent on a profile with no settings provider, where the composition
-  // config is the only source.
-  const settings = ctx.get('settings') as SettingsService | undefined
-  const scope = settings?.register<TelegramConfig>(SETTINGS_NAMESPACE, Config, { base: config })
+  // show.
+  //
+  // Bound through ctx.inject rather than read with ctx.get: a settings provider
+  // that composes after this entry would leave a get() empty, and the page
+  // would show an empty namespace forever. A profile with no provider never
+  // runs this, and the composed config stays the only source.
+  ctx.inject(['settings'], (scope) => {
+    const settings = scope.get('settings') as SettingsService | undefined
+    if (!settings) return
 
-  ctx.effect(() => {
-    let live = scope?.get() ?? config
-    let abort = new AbortController()
+    scope.effect(() => {
+      const bound = settings.register<TelegramConfig>(SETTINGS_NAMESPACE, Config, { base: config })
 
-    const run = () => {
-      const signal = abort.signal
-      void start(ctx, live, logger, signal).catch((error: unknown) => {
-        if (!signal.aborted) logger.error('[dsh-telegram] failed to start', error)
+      // The resolved value may already differ from the composed one — a user
+      // document was loaded before this ran — so adopt it before watching.
+      // Reconnecting only when it actually differs matters: with no user
+      // overrides the resolved value IS the composed one, and reopening then
+      // would cost every boot a second connection for nothing.
+      const resolved = bound.get()
+      if (resolved !== undefined && !sameJson(resolved, live)) {
+        live = resolved
+        run()
+      }
+
+      // Every setting here shapes the connection — the token it opens, who may
+      // use it, how replies are streamed — so a change reopens it rather than
+      // leaving half the new configuration unapplied until the next boot. The
+      // cost is one aborted long poll.
+      return bound.watch((next) => {
+        live = next
+        logger.info('[dsh-telegram] configuration changed; reconnecting')
+        run()
       })
-    }
-
-    run()
-
-    // Every setting here shapes the connection — the token it opens, who may
-    // use it, how replies are streamed — so a change restarts it rather than
-    // leaving half the new configuration unapplied until the next boot. The
-    // cost is one aborted long poll.
-    const unwatch = scope?.watch((next) => {
-      live = next
-      abort.abort()
-      abort = new AbortController()
-      logger.info('[dsh-telegram] configuration changed; reconnecting')
-      run()
-    })
-
-    return () => {
-      unwatch?.()
-      abort.abort()
-    }
-  }, 'dsh-telegram: connection')
+    }, 'dsh-telegram: settings namespace')
+  })
 }
 
 /**
@@ -327,6 +345,30 @@ async function resolveToken(ctx: PluginContext, ref: string): Promise<string | u
   } catch {
     return undefined
   }
+}
+
+/**
+ * Deep equality over JSON-shaped configuration.
+ *
+ * Written out rather than done with `JSON.stringify`, whose answer depends on
+ * key order — two resolutions of the same schema need not agree on it, and a
+ * false difference here costs a needless reconnection.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((item, index) => sameJson(item, b[index]))
+  }
+
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  if (keys.length !== Object.keys(right).length) return false
+
+  return keys.every((key) => Object.hasOwn(right, key) && sameJson(left[key], right[key]))
 }
 
 /** Where this plugin keeps its bindings and ownership record. */

@@ -151,7 +151,7 @@ describe('client bundle — what the factory produces', () => {
       get: () => ({ api: { credentials: {} } }),
     })
 
-    expect(register).toHaveBeenCalledWith('telegram', expect.objectContaining({ 'en-US': expect.anything() }))
+    expect(register).toHaveBeenCalledWith('telegram', expect.objectContaining({ en: expect.anything() }))
   })
 })
 
@@ -217,12 +217,48 @@ describe('client bundle — service injection', () => {
 })
 
 describe('client bundle — translations', () => {
-  it('says the same things in both shipped locales', async () => {
+  /** Load the dictionary the bundle ships. */
+  async function dictionaries(): Promise<Record<string, Record<string, string>>> {
     const { locales } = (await import('../src/client/locale.js')) as {
       locales: Record<string, Record<string, string>>
     }
-    const english = Object.keys(locales['en-US'] ?? {}).sort()
-    const chinese = Object.keys(locales['zh-CN'] ?? {}).sort()
+    return locales
+  }
+
+  it('files its strings under the shell\'s locale tags', async () => {
+    // The shell selects by `en` / `zh`, not BCP 47. A dictionary under `en-US`
+    // matches nothing and every label renders as its own key.
+    expect(Object.keys(await dictionaries()).sort()).toEqual(['en', 'zh'])
+  })
+
+  it('says the same things in both shipped locales', async () => {
+    const locales = await dictionaries()
+    const english = Object.keys(locales.en ?? {}).sort()
+    const chinese = Object.keys(locales.zh ?? {}).sort()
     expect(chinese).toEqual(english)
+  })
+
+  it('leaves no string empty, which would render as a blank control', async () => {
+    const locales = await dictionaries()
+    for (const [tag, dictionary] of Object.entries(locales)) {
+      for (const [key, text] of Object.entries(dictionary)) {
+        expect(text.trim(), `${tag}.${key}`).not.toBe('')
+      }
+    }
+  })
+
+  it('registers the dictionary the shell can actually read', () => {
+    const register = vi.fn()
+
+    ;(materializeModule() as { apply?: (c: unknown) => void }).apply?.({
+      effect: (callback: () => void) => callback(),
+      locale: { register, bind: () => (key: string) => key },
+      settingsScope: { bind: () => ({ getSnapshot: () => ({}), subscribe: () => () => undefined }) },
+      slots: { register: vi.fn(), inject: (_n: string, e: () => unknown) => void e() },
+      get: () => ({ api: { credentials: {} } }),
+    })
+
+    const [, dictionary] = register.mock.calls[0] as [string, Record<string, unknown>]
+    expect(Object.keys(dictionary).sort()).toEqual(['en', 'zh'])
   })
 })
