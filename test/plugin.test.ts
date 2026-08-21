@@ -82,10 +82,13 @@ function fakeContext() {
   const listeners = new Map<string, unknown[]>()
   let disposeEffect: (() => void) | undefined
 
+  const routes: unknown[] = []
+
   const agents = {
     get: () => undefined,
-    async create({ sessionId }: { sessionId: string }) {
+    async create({ sessionId, agentOptions }: { sessionId: string; agentOptions?: unknown }) {
       created.push(sessionId)
+      routes.push(agentOptions)
       return {
         agent: {
           id: sessionId,
@@ -150,6 +153,7 @@ function fakeContext() {
     ctx,
     prompts,
     created,
+    routes,
     listeners,
     provide: (key: string, value: unknown) => services.set(key, value),
     stop: () => disposeEffect?.(),
@@ -512,5 +516,50 @@ describe('apply — the status file', () => {
     harness.stop()
 
     expect(JSON.stringify(await status())).not.toContain('TEST-TOKEN')
+  })
+})
+
+
+describe('apply — the model route', () => {
+  it('creates agents on the deployment default, so a turn can assemble its prompt', async () => {
+    const harness = fakeContext()
+    harness.provide('agentDefaultModel', {
+      currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
+    })
+    bot.queueUpdates([textUpdate(1, 'hello')])
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(harness.prompts).toEqual(['hello']))
+    harness.stop()
+
+    expect(harness.routes[0]).toEqual({
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash',
+    })
+  })
+
+  it('still answers on a deployment that offers no default model', async () => {
+    const harness = fakeContext()
+    bot.queueUpdates([textUpdate(1, 'hello')])
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(harness.prompts).toEqual(['hello']))
+    harness.stop()
+
+    expect(harness.routes[0]).toBeUndefined()
+  })
+
+  it('survives a default-model service that throws', async () => {
+    const harness = fakeContext()
+    harness.provide('agentDefaultModel', {
+      currentSelection: () => {
+        throw new Error('no provider configured')
+      },
+    })
+    bot.queueUpdates([textUpdate(1, 'hello')])
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(() => expect(harness.prompts).toEqual(['hello']))
+    harness.stop()
   })
 })

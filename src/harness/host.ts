@@ -30,20 +30,39 @@ interface HarnessAgentHandle {
   dispose(): Promise<void>
 }
 
+/** The model route an agent opens its requests on. */
+export interface ModelRoute {
+  readonly provider: string
+  readonly model: string
+}
+
 /** The `ctx.agents` surface this plugin uses. */
 export interface AgentRegistryLike {
   get(sessionId: string): HarnessAgentLike | undefined
   create(options: {
     sessionId: string
     meta?: { cwd?: string }
+    agentOptions?: ModelRoute
   }): Promise<HarnessAgentHandle>
-  resume(options: { resumeSessionId: string }): Promise<HarnessAgentHandle>
+  resume(options: {
+    resumeSessionId: string
+    agentOptions?: ModelRoute
+  }): Promise<HarnessAgentHandle>
 }
 
 /** Construction options. */
 export interface HarnessAgentHostOptions {
   readonly agents: AgentRegistryLike
   readonly message: MessageFactory
+  /**
+   * The deployment's model route, read at creation time rather than captured,
+   * so a default changed in Settings reaches the next conversation.
+   *
+   * An agent created without one has no route to name, and prompt assembly
+   * fails the turn on an empty `{{model}}` variable — a failure that surfaces
+   * as a broken reply rather than as anything about models.
+   */
+  readonly selectModel?: () => ModelRoute | undefined
   readonly logger?: Logger
 }
 
@@ -90,13 +109,25 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
     },
 
     async create(sessionId, cwd) {
-      const handle = await options.agents.create({ sessionId, meta: { cwd } })
+      const route = options.selectModel?.()
+      const handle = await options.agents.create({
+        sessionId,
+        meta: { cwd },
+        ...(route ? { agentOptions: route } : {}),
+      })
       return adopt(handle, sessionId)
     },
 
     async resume(sessionId) {
       try {
-        const handle = await options.agents.resume({ resumeSessionId: sessionId })
+        // Supplied on resume too, matching the harness's own entry points: a
+        // log that already names a selection keeps it, and one that does not
+        // — such as a session created before this route existed — is repaired.
+        const route = options.selectModel?.()
+        const handle = await options.agents.resume({
+          resumeSessionId: sessionId,
+          ...(route ? { agentOptions: route } : {}),
+        })
         return adopt(handle, sessionId)
       } catch (error) {
         // A pruned, moved, or incompatible log is an ordinary outcome here; the

@@ -26,16 +26,20 @@ function fakeRegistry() {
     return agent
   }
 
+  const routes: (unknown | undefined)[] = []
+
   const registry: AgentRegistryLike = {
     get: (sessionId) => bare.get(sessionId),
-    async create({ sessionId }) {
+    async create({ sessionId, agentOptions }) {
+      routes.push(agentOptions)
       const agent = make(sessionId)
       return {
         agent,
         dispose: async () => void disposed.push(sessionId),
       }
     },
-    async resume({ resumeSessionId }) {
+    async resume({ resumeSessionId, agentOptions }) {
+      routes.push(agentOptions)
       if (resumeFails) throw new Error('session log is gone')
       const agent = make(resumeSessionId)
       return {
@@ -45,14 +49,20 @@ function fakeRegistry() {
     },
   }
 
-  return { registry, bare, disposed, failResume: () => void (resumeFails = true), make }
+  return { registry, bare, disposed, routes, failResume: () => void (resumeFails = true), make }
 }
 
 const message = (text: string) => ({ text })
 
-function build(registry: AgentRegistryLike) {
-  return createAgentHost({ agents: registry, message: message as never })
+function build(registry: AgentRegistryLike, selectModel?: () => { provider: string; model: string } | undefined) {
+  return createAgentHost({
+    agents: registry,
+    message: message as never,
+    ...(selectModel ? { selectModel } : {}),
+  })
 }
+
+const ROUTE = { provider: 'deepseek-official', model: 'deepseek-v4-flash' }
 
 describe('createAgentHost — creating', () => {
   it('creates a session under the requested id and cwd', async () => {
@@ -173,5 +183,44 @@ describe('message factory', () => {
     // Nothing provides @deepseek-ai/dsh-llm here, which is the case this guards.
     const factory = await resolveMessageFactory()
     expect(factory('hi').content).toEqual([{ type: 'text', text: 'hi' }])
+  })
+})
+
+
+describe('createAgentHost — the model route', () => {
+  it('gives a new agent a route, without which every turn fails to assemble', async () => {
+    const fake = fakeRegistry()
+    await build(fake.registry, () => ROUTE).create('s1', '/work')
+    expect(fake.routes[0]).toEqual(ROUTE)
+  })
+
+  it('gives a resumed agent one too, repairing a session created without', async () => {
+    const fake = fakeRegistry()
+    await build(fake.registry, () => ROUTE).resume('s1')
+    expect(fake.routes[0]).toEqual(ROUTE)
+  })
+
+  it('reads the route per agent, so a changed default reaches the next one', async () => {
+    const fake = fakeRegistry()
+    const routes = [ROUTE, { provider: 'other', model: 'newer' }]
+    const host = build(fake.registry, () => routes.shift())
+
+    await host.create('s1', '/work')
+    await host.create('s2', '/work')
+
+    expect(fake.routes[0]).toEqual(ROUTE)
+    expect(fake.routes[1]).toEqual({ provider: 'other', model: 'newer' })
+  })
+
+  it('omits the option entirely when no route is available', async () => {
+    const fake = fakeRegistry()
+    await build(fake.registry, () => undefined).create('s1', '/work')
+    expect(fake.routes[0]).toBeUndefined()
+  })
+
+  it('still creates agents on a deployment with no default-model service', async () => {
+    const fake = fakeRegistry()
+    const agent = await build(fake.registry).create('s1', '/work')
+    expect(agent.sessionId).toBe('s1')
   })
 })

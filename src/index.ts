@@ -38,7 +38,7 @@ import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
 import { resolveMessageFactory } from './harness/message.js'
 import { installQuestionProvider } from './harness/questions-seam.js'
-import type { AgentRegistryLike } from './harness/host.js'
+import type { AgentRegistryLike, ModelRoute } from './harness/host.js'
 import type {
   ApprovalOutcome,
   ApprovalRequest,
@@ -247,6 +247,7 @@ async function start(
     host: createAgentHost({
       agents: ctx.agents,
       message: await resolveMessageFactory(),
+      selectModel: () => selectModel(ctx, logger),
       logger,
     }),
     bindings,
@@ -427,6 +428,36 @@ function installApprovals(ctx: PluginContext, answerer: TelegramApprovalAnswerer
   })
 
   return () => void fiber.dispose()
+}
+
+/**
+ * The deployment's current model route.
+ *
+ * Read through `ctx.get` at creation time rather than injected: the service is
+ * optional in principle, and reading late means a default changed in Settings
+ * applies to the next conversation without a reconnect.
+ */
+function selectModel(ctx: PluginContext, logger: Logger): ModelRoute | undefined {
+  const service = ctx.get('agentDefaultModel') as
+    | { currentSelection(): ModelRoute | undefined }
+    | undefined
+
+  if (!service) {
+    logger.warn(
+      '[dsh-telegram] no agentDefaultModel service: agents will be created without a model route, ' +
+        'and every turn will fail while assembling its prompt',
+    )
+    return undefined
+  }
+
+  try {
+    const selection = service.currentSelection()
+    if (selection) return { provider: selection.provider, model: selection.model }
+  } catch (error) {
+    logger.warn('[dsh-telegram] could not read the default model selection', error)
+  }
+
+  return undefined
 }
 
 /** Resolve the bot token through the harness credential seam. */
