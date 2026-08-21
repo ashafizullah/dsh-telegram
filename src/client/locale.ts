@@ -51,6 +51,14 @@ export const locales = {
     allowFromHint: 'Comma separated. Empty enables the one-time claim flow. Send /whoami to find an id.',
     allowFromInvalid: 'Enter numeric user ids separated by commas.',
 
+    mediaTitle: 'Attachments',
+    mediaEnabled: 'Read images and text files',
+    mediaHint: 'Off replies that attachments are not accepted.',
+    visionModel: 'Model for turns with an image',
+    visionModelHint:
+      'As provider/model, for example openai/gpt-5. Empty uses the conversation\'s own model, which must then accept images — no DeepSeek model does. The override applies only to the turn carrying the image.',
+    visionModelInvalid: 'Write it as provider/model.',
+
     repliesTitle: 'Replies',
     streamingEnabled: 'Stream the answer as it is written',
     streamingHint: 'Off sends each reply once, when it is finished.',
@@ -104,6 +112,14 @@ export const locales = {
     allowFrom: '允许的 Telegram 用户 ID',
     allowFromHint: '用逗号分隔。留空启用一次性认领流程。发送 /whoami 可查看自己的 ID。',
     allowFromInvalid: '请输入以逗号分隔的数字用户 ID。',
+
+    mediaTitle: '附件',
+    mediaEnabled: '读取图片和文本文件',
+    mediaHint: '关闭后，收到附件时回复不接受。',
+    visionModel: '含图片的回合使用的模型',
+    visionModelHint:
+      '格式为 provider/model，例如 openai/gpt-5。留空则使用会话本身的模型，但该模型必须支持图片——DeepSeek 的模型都不支持。此覆盖仅作用于携带图片的那一个回合。',
+    visionModelInvalid: '请写成 provider/model 的形式。',
 
     repliesTitle: '回复',
     streamingEnabled: '边生成边显示回答',

@@ -28,6 +28,7 @@ export interface TelegramSettings {
   timeoutMs: number
   longPollSeconds: number
   streaming: { enabled: boolean; throttleMs: number; placeholder: string }
+  media: { enabled: boolean; maxBytes: number; maxTextChars: number; visionModel: string }
   reconnect: { baseDelayMs: number; maxDelayMs: number }
 }
 
@@ -74,7 +75,7 @@ export function TelegramPanel({ scope, remote, t }: PanelProps) {
   const overridden = (field: string) => isOverridden(snapshot.user, field)
 
   /** Write one field of a nested object by replacing the whole object. */
-  const writeNested = <K extends 'streaming' | 'reconnect'>(
+  const writeNested = <K extends 'streaming' | 'media' | 'reconnect'>(
     parent: K,
     patch: Partial<TelegramSettings[K]>,
   ) => write(parent, { ...value[parent], ...patch })
@@ -137,6 +138,32 @@ export function TelegramPanel({ scope, remote, t }: PanelProps) {
           onCommit={(ids) => write('allowFrom', ids)}
           onReset={() => clear('allowFrom')}
         />
+      </Section>
+
+      <Section title={t('mediaTitle')}>
+        <Row
+          label={t('mediaEnabled')}
+          hint={t('mediaHint')}
+          overridden={overridden('media')}
+          overriddenLabel={t('overridden')}
+          resetLabel={t('reset')}
+          onReset={() => clear('media')}
+        >
+          <Toggle
+            checked={value.media.enabled}
+            disabled={locked}
+            onChange={(next) => writeNested('media', { enabled: next })}
+          />
+        </Row>
+
+        <Row label={t('visionModel')} hint={t('visionModelHint')}>
+          <CommittedText
+            value={value.media.visionModel ?? ''}
+            width={240}
+            disabled={locked || !value.media.enabled}
+            onCommit={(next) => writeNested('media', { visionModel: next.trim() })}
+          />
+        </Row>
       </Section>
 
       <Section title={t('repliesTitle')}>

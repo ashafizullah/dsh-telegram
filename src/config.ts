@@ -63,6 +63,12 @@ export const Config = Schema.object({
     maxTextChars: Schema.natural()
       .default(60_000)
       .description('Truncate an inlined text file to this many characters.'),
+    visionModel: Schema.string()
+      .default('')
+      .description(
+        'Model to run a turn on when it carries an image, as provider/model. ' +
+          'Empty uses the conversation\'s own model, which must then accept images.',
+      ),
   }),
 
   reconnect: Schema.object({

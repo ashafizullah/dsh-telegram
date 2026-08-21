@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { ChatTarget } from '../interact/surface.js'
 import type { PromptPart } from '../media/collect.js'
+import type { ModelRoute } from '../harness/model-selection.js'
 import type { AgentRunner } from '../router.js'
 import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
@@ -31,6 +32,14 @@ export interface RunningAgent {
   readonly sessionId: string
   /** Queue a user message and wake the driver. */
   followup(content: readonly PromptPart[]): void
+  /**
+   * Route the next step onto another model, or back to the agent's own.
+   *
+   * @param route - the override, or undefined to drop it.
+   * @returns whether the agent accepts an override at all; a borrowed agent,
+   *   or a harness that offers no selection seam, does not.
+   */
+  useModel(route: ModelRoute | undefined): boolean
   /** Cancel the in-flight turn and any queued work. */
   cancel(reason: string): void
   /** Stop the agent and release its session. */
@@ -55,6 +64,14 @@ export interface SessionRunnerOptions {
   readonly cwd: string
   /** Session id factory; injected so tests can assert on stable ids. */
   readonly newSessionId?: () => string
+  /**
+   * The model a turn carrying an image should run on.
+   *
+   * Read late so a change in Settings applies to the next such turn. Undefined
+   * leaves every turn on the session's own model — which is right when no
+   * vision model is configured, and the only option when none exists.
+   */
+  readonly visionModel?: () => ModelRoute | undefined
   readonly logger?: Logger
 }
 
@@ -79,8 +96,20 @@ export class SessionRunner implements AgentRunner {
     if (content.length === 0) return
     await this.serialize(target, async () => {
       const agent = await this.agentFor(target)
+
+      // Set before every prompt, not only when switching: the harness reads
+      // the selection while assembling each step, so putting the override on
+      // for an image turn and off again for the next one needs no turn-end
+      // hook — the next prompt simply clears it.
+      agent.useModel(this.routeFor(content))
       agent.followup(content)
     })
+  }
+
+  /** The override this prompt needs: a vision model, or none. */
+  private routeFor(content: readonly PromptPart[]): ModelRoute | undefined {
+    if (!content.some((part) => part.type === 'image')) return undefined
+    return this.options.visionModel?.()
   }
 
   /**

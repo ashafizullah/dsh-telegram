@@ -25,8 +25,16 @@ function fakeHost() {
       sessionId,
       prompts: [] as string[],
       cancelled: [] as string[],
+      /** The override in force when each prompt was queued. */
+      routes: [] as (undefined | { provider: string; model: string })[],
+      model: undefined as undefined | { provider: string; model: string },
       followup(content: readonly { type: string; text?: string }[]) {
         agent.prompts.push(content.map((part) => part.text ?? `[${part.type}]`).join(''))
+        agent.routes.push(agent.model)
+      },
+      useModel(route: { provider: string; model: string } | undefined) {
+        agent.model = route
+        return true
       },
       cancel(reason: string) {
         agent.cancelled.push(reason)
@@ -67,15 +75,28 @@ beforeEach(async () => {
   bindings = await BindingStore.open(join(dir, 'bindings.json'))
 })
 
-function build(host: AgentHost, ids = ['s1', 's2', 's3']) {
+function build(
+  host: AgentHost,
+  ids = ['s1', 's2', 's3'],
+  visionModel?: () => { provider: string; model: string } | undefined,
+) {
   const queue = [...ids]
   return new SessionRunner({
     host,
     bindings,
     cwd: '/work',
     newSessionId: () => queue.shift() ?? 'exhausted',
+    ...(visionModel ? { visionModel } : {}),
   })
 }
+
+/** A prompt carrying an image, as a screenshot with a caption arrives. */
+const withImage = (caption: string) => [
+  { type: 'text' as const, text: caption },
+  { type: 'image' as const, attachment: { attachmentId: 'a1' } as never },
+]
+
+const VISION = { provider: 'openai', model: 'gpt-5' }
 
 describe('SessionRunner — first message', () => {
   it('creates a session and binds the chat to it', async () => {
@@ -263,5 +284,51 @@ describe('SessionRunner — empty prompts', () => {
     const fake = fakeHost()
     await build(fake.host).prompt(CHAT, [])
     expect(fake.created).toEqual([])
+  })
+})
+
+
+describe('SessionRunner — the model an image turn runs on', () => {
+  it('moves a turn carrying an image onto the vision model', async () => {
+    const fake = fakeHost()
+    await build(fake.host, ['s1'], () => VISION).prompt(CHAT, withImage('why this error?'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION])
+  })
+
+  it('leaves the next text turn on the conversation\'s own model', async () => {
+    // The point of per-turn: the expensive model is used only to look.
+    const fake = fakeHost()
+    const runner = build(fake.host, ['s1'], () => VISION)
+
+    await runner.prompt(CHAT, withImage('why this error?'))
+    await runner.prompt(CHAT, text('now fix it'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION, undefined])
+  })
+
+  it('leaves an image turn alone when no vision model is configured', async () => {
+    const fake = fakeHost()
+    await build(fake.host, ['s1']).prompt(CHAT, withImage('look'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined])
+  })
+
+  it('does not move a text turn even when a vision model is configured', async () => {
+    const fake = fakeHost()
+    await build(fake.host, ['s1'], () => VISION).prompt(CHAT, text('just words'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined])
+  })
+
+  it('reads the setting per turn, so a change applies to the next image', async () => {
+    const fake = fakeHost()
+    const routes = [VISION, { provider: 'other', model: 'newer' }]
+    const runner = build(fake.host, ['s1'], () => routes.shift())
+
+    await runner.prompt(CHAT, withImage('one'))
+    await runner.prompt(CHAT, withImage('two'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION, { provider: 'other', model: 'newer' }])
   })
 })

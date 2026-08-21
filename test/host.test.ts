@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createAgentHost } from '../src/harness/host.js'
 import type { AgentRegistryLike } from '../src/harness/host.js'
 import { fallbackMessage, resolveMessageFactory } from '../src/harness/message.js'
+import { parseRoute, sameRoute } from '../src/harness/model-selection.js'
 
 /** A registry standing in for ctx.agents, tracking who disposed what. */
 function fakeRegistry() {
@@ -234,5 +235,51 @@ describe('createAgentHost — the model route', () => {
     const fake = fakeRegistry()
     const agent = await build(fake.registry).create('s1', '/work')
     expect(agent.sessionId).toBe('s1')
+  })
+})
+
+describe('parseRoute', () => {
+  it('splits provider from model', () => {
+    expect(parseRoute('openai/gpt-5')).toEqual({ provider: 'openai', model: 'gpt-5' })
+  })
+
+  it('splits on the first separator only, since a model id may contain one', () => {
+    // 'openai/gpt-5' on a router-style provider is an ordinary model id.
+    expect(parseRoute('router/openai/gpt-5')).toEqual({
+      provider: 'router',
+      model: 'openai/gpt-5',
+    })
+  })
+
+  it('ignores surrounding whitespace', () => {
+    expect(parseRoute('  openai/gpt-5  ')).toEqual({ provider: 'openai', model: 'gpt-5' })
+  })
+
+  it('reads an empty setting as no vision model', () => {
+    expect(parseRoute('')).toBeUndefined()
+    expect(parseRoute('   ')).toBeUndefined()
+    expect(parseRoute(undefined)).toBeUndefined()
+  })
+
+  it('refuses a value missing one half', () => {
+    expect(parseRoute('openai')).toBeUndefined()
+    expect(parseRoute('/gpt-5')).toBeUndefined()
+    expect(parseRoute('openai/')).toBeUndefined()
+  })
+})
+
+describe('sameRoute', () => {
+  it('recognises the same model', () => {
+    expect(sameRoute({ provider: 'a', model: 'b' }, { provider: 'a', model: 'b' })).toBe(true)
+  })
+
+  it('distinguishes a different provider or model', () => {
+    expect(sameRoute({ provider: 'a', model: 'b' }, { provider: 'x', model: 'b' })).toBe(false)
+    expect(sameRoute({ provider: 'a', model: 'b' }, { provider: 'a', model: 'x' })).toBe(false)
+  })
+
+  it('treats two absent overrides as the same', () => {
+    expect(sameRoute(undefined, undefined)).toBe(true)
+    expect(sameRoute({ provider: 'a', model: 'b' }, undefined)).toBe(false)
   })
 })

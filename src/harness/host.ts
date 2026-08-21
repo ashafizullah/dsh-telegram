@@ -16,6 +16,8 @@
 import type { Logger } from './types.js'
 import type { AgentHost, RunningAgent } from '../session/runner.js'
 import type { MessageFactory } from './message.js'
+import type { MutableSelection, SelectionInstaller } from './model-selection.js'
+import { sameRoute } from './model-selection.js'
 
 /** A bare agent from the registry. */
 interface HarnessAgentLike {
@@ -28,6 +30,13 @@ interface HarnessAgentLike {
 interface HarnessAgentHandle {
   readonly agent: HarnessAgentLike
   dispose(): Promise<void>
+}
+
+/** What this plugin keeps for an agent it owns. */
+interface OwnedAgent {
+  readonly handle: HarnessAgentHandle
+  /** Mutated to move the next step onto another model; undefined = its own. */
+  readonly selection: MutableSelection
 }
 
 /** The model route an agent opens its requests on. */
@@ -43,10 +52,12 @@ export interface AgentRegistryLike {
     sessionId: string
     meta?: { cwd?: string }
     agentOptions?: ModelRoute
+    setup?: (agentCtx: unknown) => void
   }): Promise<HarnessAgentHandle>
   resume(options: {
     resumeSessionId: string
     agentOptions?: ModelRoute
+    setup?: (agentCtx: unknown) => void
   }): Promise<HarnessAgentHandle>
 }
 
@@ -63,6 +74,12 @@ export interface HarnessAgentHostOptions {
    * as a broken reply rather than as anything about models.
    */
   readonly selectModel?: () => ModelRoute | undefined
+  /**
+   * Installs the mutable model selection into a new agent's scope. Absent on a
+   * harness that does not offer it, in which case every turn stays on the
+   * session's own route rather than pretending to have switched.
+   */
+  readonly installSelection?: SelectionInstaller
   readonly logger?: Logger
 }
 
@@ -72,8 +89,8 @@ export interface HarnessAgentHostOptions {
  * @param options - the registry, the message factory, and a logger.
  */
 export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
-  /** Handles for agents this plugin owns, so it can dispose exactly those. */
-  const owned = new Map<string, HarnessAgentHandle>()
+  /** Agents this plugin owns, so it can dispose and re-route exactly those. */
+  const owned = new Map<string, OwnedAgent>()
 
   const wrap = (agent: HarnessAgentLike, sessionId: string): RunningAgent => ({
     sessionId,
@@ -82,27 +99,51 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
       agent.followup(options.message(content))
     },
 
+    useModel(route) {
+      const entry = owned.get(sessionId)
+      // A borrowed agent carries no selection of ours; its route is its own.
+      if (!entry) return false
+      if (sameRoute(entry.selection.current, route)) return true
+
+      entry.selection.current = route
+      return true
+    },
+
     cancel(reason: string) {
       agent.cancel(reason)
     },
 
     async dispose() {
-      const handle = owned.get(sessionId)
+      const entry = owned.get(sessionId)
       owned.delete(sessionId)
       // Only an owner may dispose. A borrowed agent is simply released.
-      if (handle) await handle.dispose()
+      if (entry) await entry.handle.dispose()
     },
   })
 
-  const adopt = (handle: HarnessAgentHandle, sessionId: string): RunningAgent => {
-    owned.set(sessionId, handle)
+  const adopt = (
+    handle: HarnessAgentHandle,
+    sessionId: string,
+    selection: MutableSelection,
+  ): RunningAgent => {
+    owned.set(sessionId, { handle, selection })
     return wrap(handle.agent, sessionId)
+  }
+
+  /** A fresh selection plus the setup that installs it, for one new agent. */
+  const prepareSelection = () => {
+    const selection: MutableSelection = { current: undefined }
+    const install = options.installSelection
+    return {
+      selection,
+      ...(install ? { setup: (agentCtx: unknown) => install(agentCtx, selection) } : {}),
+    }
   }
 
   return {
     live(sessionId) {
       const owner = owned.get(sessionId)
-      if (owner) return wrap(owner.agent, sessionId)
+      if (owner) return wrap(owner.handle.agent, sessionId)
 
       const bare = options.agents.get(sessionId)
       return bare ? wrap(bare, sessionId) : undefined
@@ -110,12 +151,14 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
 
     async create(sessionId, cwd) {
       const route = options.selectModel?.()
+      const prepared = prepareSelection()
       const handle = await options.agents.create({
         sessionId,
         meta: { cwd },
         ...(route ? { agentOptions: route } : {}),
+        ...(prepared.setup ? { setup: prepared.setup } : {}),
       })
-      return adopt(handle, sessionId)
+      return adopt(handle, sessionId, prepared.selection)
     },
 
     async resume(sessionId) {
@@ -124,11 +167,13 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
         // log that already names a selection keeps it, and one that does not
         // — such as a session created before this route existed — is repaired.
         const route = options.selectModel?.()
+        const prepared = prepareSelection()
         const handle = await options.agents.resume({
           resumeSessionId: sessionId,
           ...(route ? { agentOptions: route } : {}),
+          ...(prepared.setup ? { setup: prepared.setup } : {}),
         })
-        return adopt(handle, sessionId)
+        return adopt(handle, sessionId, prepared.selection)
       } catch (error) {
         // A pruned, moved, or incompatible log is an ordinary outcome here; the
         // runner starts a fresh conversation rather than failing the message.

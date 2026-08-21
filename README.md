@@ -90,6 +90,20 @@ Images go through the harness attachment seam, which accepts PNG, JPEG, WebP
 and GIF. Everything else it explicitly defers, so this plugin says so rather
 than accepting the message and quietly dropping what it carried.
 
+### A model has to be able to look
+
+A model that declares no image input rejects the whole request, so an image is
+checked against `inputModalities` before it is sent. **No DeepSeek model
+accepts images** — `deepseek-v4-flash` and `deepseek-v4-pro` are both text-only
+— so out of the box a screenshot is declined with a sentence naming what would
+work, and your caption still reaches the agent.
+
+Set `media.visionModel` to `provider/model` and a turn carrying an image runs
+there instead, while the next text turn goes back to the conversation's own
+model — so the expensive model is used only to look. Vision models reach the
+harness through a provider that carries them, such as an OpenAI-compatible
+route added in Settings → Models.
+
 A file that is too large, or that fails to download, becomes a note in the
 prompt explaining why — your caption still reaches the agent either way.
 
@@ -127,6 +141,7 @@ Every field has a working default; an empty config runs.
 | `media.enabled` | `true` | Read images and text files the user sends |
 | `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
 | `media.maxTextChars` | `60000` | Truncate an inlined text file to this many characters |
+| `media.visionModel` | `""` | `provider/model` for turns carrying an image; empty uses the conversation's model |
 
 ## Living alongside the web UI
 
@@ -190,7 +205,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 387 tests
+pnpm test          # 415 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle
