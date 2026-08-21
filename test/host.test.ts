@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createAgentHost } from '../src/harness/host.js'
 import type { AgentRegistryLike } from '../src/harness/host.js'
-import { fallbackMessage, resolveMessageFactory } from '../src/harness/message.js'
+import { buildUserMessage } from '../src/harness/message.js'
 import { parseRoute, sameRoute } from '../src/harness/model-selection.js'
 
 /** A registry standing in for ctx.agents, tracking who disposed what. */
@@ -170,14 +170,14 @@ describe('message factory', () => {
   const TEXT = [{ type: 'text' as const, text: 'hello' }]
 
   it('builds the documented user-message shape', () => {
-    const built = fallbackMessage(TEXT)
+    const built = buildUserMessage(TEXT)
     expect(built.role).toBe('user')
     expect(built.content).toEqual(TEXT)
     expect(built.source).toEqual({ kind: 'user' })
   })
 
   it('carries an image block beside the text, which is how a screenshot arrives', () => {
-    const built = fallbackMessage([
+    const built = buildUserMessage([
       { type: 'text', text: 'why this error?' },
       { type: 'image', attachment: { attachmentId: 'a1' } },
     ])
@@ -185,17 +185,16 @@ describe('message factory', () => {
   })
 
   it('gives every message its own identity', () => {
-    expect(fallbackMessage(TEXT).id).not.toBe(fallbackMessage(TEXT).id)
+    expect(buildUserMessage(TEXT).id).not.toBe(buildUserMessage(TEXT).id)
   })
 
   it('freezes the message, since the harness publishes it as immutable', () => {
-    expect(Object.isFrozen(fallbackMessage(TEXT))).toBe(true)
+    expect(Object.isFrozen(buildUserMessage(TEXT))).toBe(true)
   })
 
-  it('falls back cleanly when the harness module is absent', async () => {
-    // Nothing provides @deepseek-ai/dsh-llm here, which is the case this guards.
-    const factory = await resolveMessageFactory()
-    expect(factory(TEXT).content).toEqual(TEXT)
+  it('builds the same shape the harness factory would', async () => {
+    // A plugin cannot import that factory, so this shape is the contract.
+    expect(buildUserMessage(TEXT).content).toEqual(TEXT)
   })
 })
 

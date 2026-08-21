@@ -16,7 +16,7 @@
 import type { Logger } from './types.js'
 import type { AgentHost, RunningAgent } from '../session/runner.js'
 import type { MessageFactory } from './message.js'
-import type { MutableSelection, SelectionInstaller } from './model-selection.js'
+import type { AgentContextLike, MutableSelection } from './model-selection.js'
 import { sameRoute } from './model-selection.js'
 
 /** A bare agent from the registry. */
@@ -75,11 +75,10 @@ export interface HarnessAgentHostOptions {
    */
   readonly selectModel?: () => ModelRoute | undefined
   /**
-   * Installs the mutable model selection into a new agent's scope. Absent on a
-   * harness that does not offer it, in which case every turn stays on the
-   * session's own route rather than pretending to have switched.
+   * Installs the mutable model selection into a new agent's scope. Absent
+   * leaves every turn on the session's own route.
    */
-  readonly installSelection?: SelectionInstaller
+  readonly installSelection?: (agentCtx: AgentContextLike, selection: MutableSelection) => void
   readonly logger?: Logger
 }
 
@@ -136,7 +135,9 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
     const install = options.installSelection
     return {
       selection,
-      ...(install ? { setup: (agentCtx: unknown) => install(agentCtx, selection) } : {}),
+      ...(install
+        ? { setup: (agentCtx: unknown) => install(agentCtx as AgentContextLike, selection) }
+        : {}),
     }
   }
 

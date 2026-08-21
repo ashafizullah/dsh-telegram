@@ -4,58 +4,131 @@
  * The harness holds one mutable selection object per agent, installed while
  * the agent is still unpublished, and reads `current` each time it assembles a
  * prompt. Mutating that object is how the web UI's model picker changes a
- * running session's model, and it is what lets a single turn — the one
- * carrying an image — run somewhere its neighbours do not.
+ * running session's model, and it is what lets a conversation carrying an
+ * image run somewhere its neighbours do not.
  *
  * `current: undefined` means "no override", so the agent falls back to the
  * route it was created with. That is what makes reverting free: there is
  * nothing to restore, only an override to drop.
  *
- * Imported dynamically for the same reason as the message factory: the module
- * belongs to the host, not to this plugin, and pinning it here would mean
- * shipping a version the deployment has no say over.
+ * ## Why this is reproduced rather than imported
+ *
+ * The harness exports `installModelSelection` from `@deepseek-ai/dsh-agent`,
+ * and importing it would be the obvious thing to do. It cannot be done: under
+ * pnpm's isolated layout a plugin resolves only its own declared dependencies,
+ * and the harness packages are the host's, not ours. A dynamic import of them
+ * fails with `ERR_MODULE_NOT_FOUND` every time — which is exactly how this
+ * feature came to do nothing at all while looking like it worked.
+ *
+ * What it does is two listener registrations on the agent's own context, so
+ * that is what this does. The coupling is to two event names and their
+ * payloads; `test/model-selection.test.ts` pins both.
  */
 
 /** A provider and model an agent's next step should use. */
 export interface ModelRoute {
   readonly provider: string
   readonly model: string
+  /** Effort to request; absent clears any inherited one. */
+  readonly reasoningEffort?: string
 }
 
-/** The object the harness reads before each prompt assembly. */
+/** The object read before each prompt assembly. */
 export interface MutableSelection {
   /** The override in force, or undefined to use the agent's own route. */
   current?: ModelRoute | undefined
-  /** Written by the harness; the selection it last assembled with. */
-  assembled?: unknown
+  /**
+   * The selection the last assembly actually used.
+   *
+   * Recorded at assembly and read at request time so both halves of one step
+   * agree, even if `current` changes in between.
+   */
+  assembled?: ModelRoute | undefined
 }
 
-/** Installs a selection into an unpublished agent's scope. */
-export type SelectionInstaller = (agentCtx: unknown, selection: MutableSelection) => void
+/** The slice of an agent's scoped context this needs. */
+export interface AgentContextLike {
+  on(
+    event: 'system-prompt/assemble',
+    listener: (
+      assembly: unknown,
+      context: unknown,
+      next: () => Promise<PromptAssembly>,
+    ) => Promise<PromptAssembly>,
+  ): () => void
+  on(
+    event: 'agent/request',
+    listener: (payload: unknown, next: () => Promise<ModelRequest>) => Promise<ModelRequest>,
+  ): () => void
+}
 
-/** Shape of the harness module this borrows from. */
-interface AgentModule {
-  installModelSelection?: (agentCtx: unknown, selection: MutableSelection) => unknown
+/** What a prompt assembly carries that this rewrites. */
+interface PromptAssembly {
+  variables?: Record<string, unknown>
+}
+
+/** What a model request carries that this rewrites. */
+interface ModelRequest {
+  provider?: string
+  model?: string
+  reasoningEffort?: string
 }
 
 /**
- * Resolve the installer, or undefined when the harness does not offer it.
+ * Make an agent follow a mutable selection.
  *
- * A deployment without it simply cannot switch a live agent's model; the
- * plugin then keeps every turn on the session's own route rather than
- * pretending to have switched.
+ * @param agentCtx - the agent's scoped context, during unpublished setup.
+ * @param selection - the object whose `current` decides each step's route.
+ * @returns a disposer removing both listeners.
  */
-export async function resolveSelectionInstaller(): Promise<SelectionInstaller | undefined> {
-  try {
-    // A variable specifier: the module is the host's to provide, so it must
-    // not be resolved — or required — at build time.
-    const specifier = '@deepseek-ai/dsh-agent'
-    const agent = (await import(specifier)) as AgentModule
-    const install = agent.installModelSelection
-    if (typeof install !== 'function') return undefined
-    return (agentCtx, selection) => void install(agentCtx, selection)
-  } catch {
-    return undefined
+export function installModelSelection(
+  agentCtx: AgentContextLike,
+  selection: MutableSelection,
+): () => void {
+  const disposeAssembly = agentCtx.on(
+    'system-prompt/assemble',
+    async (_assembly, _context, next) => {
+      const selected = selection.current
+      const assembled = await next()
+
+      // Recorded even when absent: the request half reads this, and a stale
+      // value would route one step on a selection another step assembled.
+      selection.assembled = selected
+      if (selected === undefined) return assembled
+
+      return {
+        ...assembled,
+        variables: {
+          ...assembled.variables,
+          provider: selected.provider,
+          model: selected.model,
+        },
+      }
+    },
+  )
+
+  const disposeRequest = agentCtx.on('agent/request', async (_payload, next) => {
+    const resolved = await next()
+    const selected = selection.assembled
+    if (selected === undefined) return resolved
+
+    // The inherited effort is dropped rather than kept: it belongs to the
+    // model being replaced, and a effort one model offers another may not.
+    const { reasoningEffort: _inherited, ...withoutInheritedEffort } = resolved
+
+    return {
+      ...withoutInheritedEffort,
+      provider: selected.provider,
+      model: selected.model,
+      ...(selected.reasoningEffort === undefined
+        ? {}
+        : { reasoningEffort: selected.reasoningEffort }),
+    }
+  })
+
+  return () => {
+    disposeAssembly()
+    disposeRequest()
   }
 }
 

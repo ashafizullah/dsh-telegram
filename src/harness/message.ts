@@ -1,18 +1,19 @@
 /**
  * Building the user message the agent's inbox accepts.
  *
- * `agent.followup()` takes an identified, frozen `UserMessage`, and the
- * harness's own factory (`createUserMessage` in `@deepseek-ai/dsh-llm`) is the
- * only thing that should decide what "identified and frozen" means — it may
- * gain validation or a different id scheme in any release.
+ * `agent.followup()` takes an identified, frozen `UserMessage`. The harness
+ * has its own factory for that — `createUserMessage` in `@deepseek-ai/dsh-llm`
+ * — and this once tried to import it, preferring the real thing.
  *
- * That package is provided by the harness at runtime, not by this plugin, so
- * it is imported dynamically rather than depended on at build time. Pinning a
- * version here would mean shipping types for a package the host already owns,
- * and mismatching it on every harness upgrade.
+ * It never once succeeded. Under pnpm's isolated layout a plugin resolves only
+ * its own declared dependencies, and the harness packages belong to the host,
+ * so the import failed with `ERR_MODULE_NOT_FOUND` on every call and this
+ * shape was always what got used. Claiming otherwise in a comment made the
+ * code harder to reason about, not easier.
  *
- * The fallback exists so the plugin still loads against a harness that moved
- * the factory: the shape it produces is the documented one.
+ * So the documented shape is the only path, and it is exact: an id, the user
+ * role, the content blocks, and a `user` source, deep-frozen before it is
+ * handed over.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -39,39 +40,8 @@ export interface UserMessageLike {
  */
 export type MessageFactory = (content: readonly ContentBlock[]) => UserMessageLike
 
-/** Shape of the harness module we borrow the factory from. */
-interface LlmModule {
-  createUserMessage?: (input: unknown) => unknown
-}
-
-/**
- * Resolve the message factory, preferring the harness's own.
- *
- * @returns a factory that turns prompt text into a user message.
- */
-export async function resolveMessageFactory(): Promise<MessageFactory> {
-  try {
-    // A variable specifier: the module is the host's to provide, so it must
-    // not be resolved — or required — at build time.
-    const specifier = '@deepseek-ai/dsh-llm'
-    const llm = (await import(specifier)) as LlmModule
-    const create = llm.createUserMessage
-    if (typeof create === 'function') {
-      return (content) =>
-        create({
-          content: [...content],
-          source: { kind: 'user' },
-        }) as UserMessageLike
-    }
-  } catch {
-    // The harness did not provide it; the documented shape below still works.
-  }
-
-  return fallbackMessage
-}
-
-/** The documented user-message shape, built without the harness factory. */
-export function fallbackMessage(content: readonly ContentBlock[]): UserMessageLike {
+/** Build one user message in the shape the agent's inbox accepts. */
+export function buildUserMessage(content: readonly ContentBlock[]): UserMessageLike {
   return Object.freeze({
     id: randomUUID(),
     role: 'user',

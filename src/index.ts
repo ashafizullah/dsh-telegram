@@ -42,8 +42,8 @@ import { createAgentHost } from './harness/host.js'
 import { MediaCollector } from './media/collect.js'
 import { VisionCheck } from './media/vision.js'
 import type { ModelCatalog } from './media/vision.js'
-import { resolveMessageFactory } from './harness/message.js'
-import { parseRoute, resolveSelectionInstaller } from './harness/model-selection.js'
+import { buildUserMessage } from './harness/message.js'
+import { installModelSelection, parseRoute } from './harness/model-selection.js'
 import { installQuestionProvider } from './harness/questions-seam.js'
 import type { AgentRegistryLike, ModelRoute } from './harness/host.js'
 import type {
@@ -264,22 +264,12 @@ async function start(
     logger,
   })
 
-  // Without the selection seam a turn cannot be moved onto another model, so
-  // the vision setting would silently do nothing; say so once instead.
-  const installSelection = await resolveSelectionInstaller()
-  if (!installSelection && parseRoute(config.media.visionModel)) {
-    logger.warn(
-      '[dsh-telegram] a vision model is configured, but this harness offers no model-selection seam; ' +
-        'image turns will run on the conversation\'s own model',
-    )
-  }
-
   const runner = new SessionRunner({
     host: createAgentHost({
       agents: ctx.agents,
-      message: await resolveMessageFactory(),
+      message: buildUserMessage,
       selectModel: () => selectModel(ctx, logger),
-      ...(installSelection ? { installSelection } : {}),
+      installSelection: installModelSelection,
       logger,
     }),
     bindings,
