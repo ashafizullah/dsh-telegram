@@ -1,0 +1,43 @@
+# Runs the suite the badge claims is passing.
+#
+# A "tests passing" badge is only worth showing if something actually runs
+# them, so this is what stands behind it: the same typecheck, tests and
+# coverage thresholds the project uses locally, on the Node version the
+# package declares it needs.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # So a badge can be refreshed without waiting for a commit.
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: typecheck and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pinned version from package.json's packageManager field, so
+      # CI resolves dependencies exactly as a developer does.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Fails rather than silently updating the lockfile: a drifting lockfile
+      # means CI stopped testing what a fresh clone installs.
+      - run: pnpm install --frozen-lockfile
+
+      # Both halves: the host build and the browser build have separate
+      # configs and only checking one leaves the other free to rot.
+      - run: pnpm typecheck
+
+      # Coverage rather than plain test: vitest.config.ts carries the 80%
+      # thresholds, and they are only enforced when coverage runs.
+      - run: pnpm coverage
