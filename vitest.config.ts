@@ -6,6 +6,7 @@ export default defineConfig({
   esbuild: { jsx: 'automatic' },
   test: {
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
+    setupFiles: ['test/setup.ts'],
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],

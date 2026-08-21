@@ -44,6 +44,7 @@ async function build(options: { allowFrom?: number[] } = {}) {
     textCapture,
     runner,
     botUsername: 'my_bot',
+    redact: (text) => text.split('SECRET-TOKEN').join('<redacted>'),
   })
 
   return { router, said, answered, runner, questions, approvals, textCapture, access }
@@ -288,5 +289,30 @@ describe('UpdateRouter — robustness', () => {
       },
     })
     expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, 'revised prompt')
+  })
+})
+
+
+describe('UpdateRouter — what it says out loud', () => {
+  it('redacts a secret quoted by a failure before posting it to the chat', async () => {
+    const { router, runner, said } = await build()
+    ;(runner.prompt as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('request to https://api.example/botSECRET-TOKEN/x failed'),
+    )
+
+    await router.handle(message('hello'))
+
+    expect(said[0]).not.toContain('SECRET-TOKEN')
+    // Redaction runs before html escaping, so the marker arrives escaped and
+    // the user reads a literal <redacted> rather than markup.
+    expect(said[0]).toContain('&lt;redacted&gt;')
+  })
+
+  it('still tells the user what went wrong', async () => {
+    const { router, runner, said } = await build()
+    ;(runner.prompt as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('disk full'))
+
+    await router.handle(message('hello'))
+    expect(said[0]).toContain('disk full')
   })
 })

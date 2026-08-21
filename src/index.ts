@@ -23,6 +23,7 @@ import { randomUUID } from 'node:crypto'
 
 import { AccessPolicy } from './access.js'
 import { StatusFile, describeError } from './diagnostics.js'
+import { SecretRegistry } from './secrets.js'
 import { Config } from './config.js'
 import { TelegramApprovalAnswerer } from './interact/approvals.js'
 import { PendingRegistry } from './interact/pending.js'
@@ -99,14 +100,18 @@ export function apply(ctx: PluginContext, config: TelegramConfig): void {
   let live = config
   let abort: AbortController | undefined
 
-  const status = new StatusFile(join(dataDirectory(), 'status.json'))
+  // One registry for the plugin's lifetime: the token is registered the moment
+  // it is resolved, and every file, log line, and chat message written after
+  // that passes through it.
+  const secrets = new SecretRegistry()
+  const status = new StatusFile(join(dataDirectory(), 'status.json'), secrets.redactor())
 
   /** (Re)open the connection under the configuration standing right now. */
   const run = () => {
     abort?.abort()
     abort = new AbortController()
     const signal = abort.signal
-    void start(ctx, live, logger, signal, status).catch((error: unknown) => {
+    void start(ctx, live, logger, signal, status, secrets).catch((error: unknown) => {
       if (signal.aborted) return
       logger.error('[dsh-telegram] failed to start', error)
       void status.publish('failed', { detail: describeError(error) })
@@ -182,6 +187,7 @@ async function start(
   logger: Logger,
   signal: AbortSignal,
   status: StatusFile,
+  secrets: SecretRegistry,
 ): Promise<void> {
   if (!config.enabled) {
     logger.info('[dsh-telegram] disabled; not connecting')
@@ -200,6 +206,8 @@ async function start(
     await status.publish('idle', { detail })
     return
   }
+
+  secrets.protect(token)
 
   const api = new TelegramApi({
     token,
@@ -263,6 +271,7 @@ async function start(
     textCapture,
     runner,
     ...(me.username ? { botUsername: me.username } : {}),
+    redact: secrets.redactor(),
     logger,
   })
 

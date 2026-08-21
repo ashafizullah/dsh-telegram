@@ -243,18 +243,29 @@ export class TelegramApi {
     return this.call<TelegramFile>('getFile', { file_id: fileId })
   }
 
-  /** Download a resolved file's bytes. */
+  /**
+   * Download a resolved file's bytes.
+   *
+   * The download URL carries the token in its path, and a transport failure
+   * quotes the URL it was given — so this fetch is wrapped like every other,
+   * or a dropped connection would hand the token to the caller's log.
+   */
   async downloadFile(filePath: string, signal?: AbortSignal): Promise<Uint8Array> {
     const url = `${this.base()}/file/bot${this.options.token}/${filePath.replace(/^\/+/, '')}`
-    const response = await this.fetchImpl(url, signal ? { signal } : {})
-    if (!response.ok) {
-      throw new TelegramApiError(
-        `telegram file download failed with http ${response.status}`,
-        response.status,
-        undefined,
-      )
+
+    try {
+      const response = await this.fetchImpl(url, signal ? { signal } : {})
+      if (!response.ok) {
+        throw new TelegramApiError(
+          `telegram file download failed with http ${response.status}`,
+          response.status,
+          undefined,
+        )
+      }
+      return new Uint8Array(await response.arrayBuffer())
+    } catch (error) {
+      throw this.normalize(error, 'downloadFile')
     }
-    return new Uint8Array(await response.arrayBuffer())
   }
 
   /** Base url without a trailing slash. */

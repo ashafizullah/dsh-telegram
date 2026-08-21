@@ -59,6 +59,12 @@ export interface UpdateRouterOptions {
   readonly runner: AgentRunner
   /** This bot's username, so `/cmd@other_bot` is left alone in groups. */
   readonly botUsername?: string
+  /**
+   * Strips secrets from anything posted back into a chat. Agent failures are
+   * reported to the user verbatim, and an error raised deep in a provider can
+   * quote a credential it was given.
+   */
+  readonly redact?: (text: string) => string
   readonly logger?: Logger
 }
 
@@ -203,7 +209,8 @@ export class UpdateRouter {
     try {
       await this.options.runner.prompt(target, text)
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error)
+      const raw = error instanceof Error ? error.message : String(error)
+      const reason = this.options.redact?.(raw) ?? raw
       this.logger.error('[dsh-telegram] prompt failed', error)
       await this.say(target, `⚠️ ${escapeHtml(reason)}`)
     }

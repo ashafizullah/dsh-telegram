@@ -191,7 +191,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await bot.close()
-  delete process.env.DSH_HOME
+  // Deliberately NOT cleared: an async start still in flight would resolve its
+  // data directory from the fallback and write into the real DSH home.
 })
 
 /** Config pointed at the stub server, with access already granted to user 7. */
