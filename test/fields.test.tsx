@@ -22,9 +22,13 @@ function knobStyle(element: unknown): Record<string, unknown> {
 }
 
 describe('Toggle — the track', () => {
-  it('paints a real fill when on', () => {
+  it('paints the action colour when on, not a theme-inverting shade', () => {
+    // `brand` is a NEUTRAL despite the name — near-black in the light theme,
+    // near-white in the dark one — so a switch turned on with it is a white
+    // slab in one theme and a black one in the other.
     const track = styleOf(Toggle({ checked: true, onChange: () => undefined }))
-    expect(track.background).toBe(FILL.brand)
+    expect(track.background).toBe(FILL.action)
+    expect(track.background).not.toBe(FILL.brand)
   })
 
   it('paints a real fill when off, so the knob never floats on the page', () => {
