@@ -51,6 +51,18 @@ export interface AttachmentStore {
   readonly imageLimits?: ImageLimits
 }
 
+/** What the caller knows about the turn these attachments are for. */
+export interface CollectionContext {
+  /**
+   * Whether the model this turn will run on accepts images itself.
+   *
+   * Decided per conversation, because `/model` is per conversation: judging
+   * the deployment default would refuse an image on a chat that had switched
+   * to a model which can see.
+   */
+  readonly modelSees?: boolean
+}
+
 /** What a message's attachments became, plus anything the user should be told. */
 export interface CollectedMedia {
   /** Content for the agent, in the order the model should read it. */
@@ -110,7 +122,11 @@ export class MediaCollector {
    * @param caption - the text the user typed, if any.
    * @returns text and image parts, in the order the model should read them.
    */
-  async collect(message: TelegramMessage, caption: string | undefined): Promise<CollectedMedia> {
+  async collect(
+    message: TelegramMessage,
+    caption: string | undefined,
+    context: CollectionContext = {},
+  ): Promise<CollectedMedia> {
     const item = describeMedia(message)
     const said = caption?.trim()
 
@@ -133,10 +149,12 @@ export class MediaCollector {
     }
 
     if (item.kind === 'image') {
-      // Skipped when something else can read the picture. The refusal exists
-      // to replace a failed turn with a useful sentence; with a fallback in
-      // place it would instead throw away an image that was going to be read.
-      const readable = (await this.options.canReadWithoutModel?.()) === true
+      // Skipped when anything can read the picture: the conversation's own
+      // model, a vision model behind it, or OCR. The refusal exists to replace
+      // a failed turn with a useful sentence, and with any of those in place it
+      // would instead throw away an image that was going to be read.
+      const readable =
+        context.modelSees === true || (await this.options.canReadWithoutModel?.()) === true
       const refusal = readable ? undefined : await this.imageRefusal()
       if (refusal) return this.declined(said, refusal.forAgent, refusal.forUser)
     }
@@ -215,17 +233,20 @@ export class MediaCollector {
   async collectAll(
     messages: readonly TelegramMessage[],
     caption: string | undefined,
+    context: CollectionContext = {},
   ): Promise<CollectedMedia> {
     if (messages.length === 0) return { parts: [] }
     if (messages.length === 1) {
-      return await this.collect(messages[0] as TelegramMessage, caption)
+      return await this.collect(messages[0] as TelegramMessage, caption, context)
     }
 
     // Sequential rather than parallel: each part downloads bytes and commits
     // them, and a dozen at once is a burst of traffic and disk for no gain
     // when the user is waiting on the whole set anyway.
     const collected: CollectedMedia[] = []
-    for (const message of messages) collected.push(await this.collect(message, undefined))
+    for (const message of messages) {
+      collected.push(await this.collect(message, undefined, context))
+    }
 
     const said = caption?.trim()
     const images = collected.flatMap((item) => item.parts.filter((part) => part.type === 'image'))

@@ -287,6 +287,19 @@ work, and your caption still reaches the agent.
 **Settings → Telegram → Attachments** offers a dropdown of the models already
 configured in Settings → Models. Pick one and images become readable.
 
+**If the conversation's own model reads images, none of this happens.** The
+picture goes straight through, and the model looks at it. Since DeepSeek
+shipped `deepseek-v4-flash-vision-exp` that is a real choice rather than a
+hypothetical, and it is the better one when the screenshot is not just text: a
+transcription loses the diagram, the chart, the misaligned layout — everything
+you were actually asking about.
+
+The indirection below exists because a provider inspects the whole request
+history, so an image binds a conversation to a model that can see. When that
+model IS the one you chose, there is nothing to be stuck on and nothing to work
+around — so the reading, the refusal, and the sticky routing all stand down
+together.
+
 The picture never enters your conversation. It goes to a throwaway session on
 that model, which is asked to transcribe every piece of text in it and describe
 what it is; the reply comes back as ordinary text and *that* is what your

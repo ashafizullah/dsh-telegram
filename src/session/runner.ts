@@ -131,6 +131,20 @@ export interface SessionRunnerOptions {
    */
   readonly extractor?: PromptResolver
   /**
+   * Whether the model this conversation runs on reads images itself.
+   *
+   * When it does, extraction is not merely unnecessary — it is worse. The
+   * conversation would receive a transcription instead of the picture, so a
+   * diagram, a chart or a misaligned layout becomes scattered words, and the
+   * model never gets to look at the thing it was asked about.
+   *
+   * The indirection exists because a provider inspects the whole request
+   * history: an image left in a conversation binds it to a model that can see.
+   * When that model IS the one the conversation chose, there is nothing to be
+   * stuck on and nothing to work around.
+   */
+  readonly modelSees?: (target: ChatTarget) => Promise<boolean>
+  /**
    * The model a conversation must move to when an image did reach it.
    *
    * Only the fallback: reached when there is no extractor, or when reading the
@@ -169,10 +183,15 @@ export class SessionRunner implements AgentRunner {
   async prompt(target: ChatTarget, content: readonly PromptPart[]): Promise<void> {
     if (content.length === 0) return
 
+    // Asked once and used three times: whether to read the picture elsewhere,
+    // whether to refuse it, and whether to move the conversation off its own
+    // model. A model that can look wants none of that done for it.
+    const sees = (await this.options.modelSees?.(target).catch(() => false)) === true
+
     // Resolved before the conversation's agent is touched at all, and outside
     // the serialisation: reading an image takes a model call, and holding the
     // conversation's queue for it would stall every later message behind it.
-    const resolved = await this.resolve(content)
+    const resolved = sees ? [...content] : await this.resolve(content)
     if (resolved.length === 0) return
 
     await this.serialize(target, async () => {
@@ -181,7 +200,7 @@ export class SessionRunner implements AgentRunner {
       // Only reached when an image survived resolution. Set before the prompt:
       // the harness reads the selection while assembling each step, so the
       // override must be in place by the time the turn runs.
-      agent.useModel(this.routeFor(target, resolved))
+      agent.useModel(sees ? undefined : this.routeFor(target, resolved))
 
       // Recorded BEFORE the turn runs, because from this point the session's
       // log carries an image and every later turn must be routed for it.

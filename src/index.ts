@@ -60,7 +60,7 @@ import { TypingIndicator } from './telegram/typing.js'
 import { VisionExtractor } from './media/extractor.js'
 import { OcrReader } from './media/ocr.js'
 import { MediaCollector } from './media/collect.js'
-import { VisionCheck } from './media/vision.js'
+import { VisionCheck, acceptsImages } from './media/vision.js'
 import type { ModelCatalog } from './media/vision.js'
 import { buildUserMessage } from './harness/message.js'
 import { installModelSelection, parseRoute } from './harness/model-selection.js'
@@ -394,6 +394,31 @@ async function start(
     return effort === undefined ? base : { ...base, reasoningEffort: effort }
   }
 
+  // The llm service knows which models declare image input. Read before the
+  // predicate below, which closes over it.
+  const catalog = ctx.get('llm') as ModelCatalog | undefined
+
+  /**
+   * Whether the model a conversation runs on reads images itself.
+   *
+   * One question, two consumers: it decides whether an attachment is refused,
+   * and whether the picture is read elsewhere before the conversation sees it.
+   * Both used to judge the deployment default, which stopped being right the
+   * moment a model that can see became selectable per conversation.
+   */
+  const modelSees = async (target: ChatTarget): Promise<boolean> => {
+    if (!catalog) return false
+    const route = chosenRoute(target) ?? selectModel(ctx, logger)
+    if (!route) return false
+
+    try {
+      const info = await (catalog as ModelCatalog).resolveModelInfo(route.provider, route.model)
+      return acceptsImages(info)
+    } catch {
+      return false
+    }
+  }
+
   const history = await ChatHistory.open(join(home, 'history.json'))
 
   const runner = new SessionRunner({
@@ -401,6 +426,7 @@ async function start(
     bindings,
     cwdFor,
     chosenRoute,
+    modelSees,
     permission,
     history,
     extractor,
@@ -412,7 +438,6 @@ async function start(
 
   // The llm service knows which models declare image input; without it the
   // check is skipped and the provider stays the authority.
-  const catalog = ctx.get('llm') as ModelCatalog | undefined
   const vision = catalog
     ? new VisionCheck(catalog, () =>
         // The model an image would ACTUALLY run on, not the conversation's
@@ -477,6 +502,7 @@ async function start(
     questions,
     approvals,
     recovery,
+    modelSees,
     sessions: sessionPicker,
     typing,
     diagnostics: {

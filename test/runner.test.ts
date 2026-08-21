@@ -453,6 +453,75 @@ describe('SessionRunner — the status rows', () => {
   })
 })
 
+describe('SessionRunner — when the conversation\'s own model can see', () => {
+  it('sends the picture, not a description of it', async () => {
+    // Extraction is not merely unnecessary here — it is worse. A transcription
+    // loses the diagram, the chart, the misaligned layout: everything the
+    // model was actually being asked to look at.
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      extractor: reader(),
+      modelSees: async () => true,
+    })
+
+    await runner.prompt(CHAT, withImage('why does this look wrong?'))
+    expect(fake.agents.get('s1')?.prompts).toEqual(['why does this look wrong?[image]'])
+  })
+
+  it('does not move the conversation, since it is already where it belongs', async () => {
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      visionRoute: () => VISION,
+      modelSees: async () => true,
+    })
+
+    await runner.prompt(CHAT, withImage('look'))
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined])
+  })
+
+  it('still extracts when the model cannot see', async () => {
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      extractor: reader(),
+      modelSees: async () => false,
+    })
+
+    await runner.prompt(CHAT, withImage('how much?'))
+    expect(fake.agents.get('s1')?.prompts[0]).toContain('Contents of the image')
+  })
+
+  it('extracts when the question cannot be answered at all', async () => {
+    // An unanswerable check must not quietly disable the workaround that
+    // keeps a text-only conversation working.
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      extractor: reader(),
+      modelSees: async () => {
+        throw new Error('the catalog is unreachable')
+      },
+    })
+
+    await runner.prompt(CHAT, withImage('how much?'))
+    expect(fake.agents.get('s1')?.prompts[0]).toContain('Contents of the image')
+  })
+})
+
 describe('SessionRunner — an image read before the conversation sees it', () => {
   it('sends the reading, not the picture', async () => {
     const fake = fakeHost()

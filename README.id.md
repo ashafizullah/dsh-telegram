@@ -302,6 +302,18 @@ Buka **Settings → Telegram → Attachments**, di situ ada dropdown berisi mode
 yang sudah kamu tambahkan di Settings → Models. Pilih satu, dan gambar langsung
 bisa dibaca.
 
+**Kalau model percakapanmu sendiri sudah bisa membaca gambar, semua ini tidak
+terjadi.** Gambarnya langsung lewat, dan modelnya yang melihat. Sejak DeepSeek
+merilis `deepseek-v4-flash-vision-exp`, itu pilihan nyata — dan pilihan yang
+lebih baik kalau screenshot-nya bukan sekadar teks: transkripsi menghilangkan
+diagramnya, grafiknya, layout yang melenceng — justru hal yang kamu tanyakan.
+
+Indireksi di bawah ini ada karena provider memeriksa seluruh riwayat request,
+jadi gambar mengikat percakapan ke model yang bisa melihat. Kalau model itu
+**memang** yang kamu pilih, tidak ada yang perlu dilepaskan dan tidak ada yang
+perlu diakali — jadi pembacaannya, penolakannya, dan routing lengketnya mundur
+bersamaan.
+
 Gambarnya sendiri tidak pernah masuk ke percakapanmu. Dia dikirim ke sesi
 sekali-pakai di model tadi, yang diminta menyalin semua teks di dalamnya dan
 menjelaskan singkat itu gambar apa. Jawabannya balik sebagai teks biasa, dan

@@ -477,6 +477,31 @@ describe('MediaCollector — a model that cannot see', () => {
     return collector
   }
 
+  it('sends the image anyway when the turn\'s own model can see', async () => {
+    // The refusal judges the deployment default, which stopped being right the
+    // moment a model that can see became selectable per conversation.
+    const collector = withVision('no')
+    const { parts, notice } = await collector.collect(
+      message({ photo: [{ file_id: 'p' }] }),
+      'why this error?',
+      { modelSees: true },
+    )
+
+    expect(notice).toBeUndefined()
+    expect(parts.map((part) => part.type)).toEqual(['text', 'image'])
+  })
+
+  it('still refuses when nothing can read it', async () => {
+    const collector = withVision('no')
+    const { notice } = await collector.collect(
+      message({ photo: [{ file_id: 'p' }] }),
+      'why?',
+      { modelSees: false },
+    )
+
+    expect(notice).toContain("can't read images")
+  })
+
   it('leaves the image out rather than failing the turn', async () => {
     const collector = withVision('no')
     const { parts } = await collector.collect(message({ photo: [{ file_id: 'p' }] }), 'why?')

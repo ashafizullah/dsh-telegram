@@ -196,6 +196,11 @@ export interface UpdateRouterOptions {
   readonly workspace?: WorkspaceControl
   /** Absent leaves every conversation on the deployment's model. */
   readonly models?: ModelControl
+  /**
+   * Whether this conversation's model accepts images itself. Absent decides
+   * refusals the way they were decided before any model could see.
+   */
+  readonly modelSees?: (target: ChatTarget) => Promise<boolean>
   /** Offers this chat's earlier conversations. Absent makes `/new` one-way. */
   readonly sessions?: CallbackHandler & { offer(target: ChatTarget): Promise<void> }
   /** Absent leaves every conversation on the model's own reasoning effort. */
@@ -361,7 +366,9 @@ export class UpdateRouter {
     // the chat while they run.
     const release = this.options.typing?.hold(target)
     try {
-      const collected = await this.options.media.collect(message, text)
+      const collected = await this.options.media.collect(message, text, {
+        modelSees: await this.modelSees(target),
+      })
       // Said first: the user should not have to wait for a reply to learn that
       // what they attached went nowhere.
       if (collected.notice) await this.say(target, escapeHtml(collected.notice))
@@ -388,7 +395,9 @@ export class UpdateRouter {
     const release = this.options.typing?.hold(target)
 
     try {
-      const collected = await this.options.media.collectAll(messages, caption)
+      const collected = await this.options.media.collectAll(messages, caption, {
+        modelSees: await this.modelSees(target),
+      })
       if (collected.notice) await this.say(target, escapeHtml(collected.notice))
       await this.runPrompt(target, collected.parts)
     } catch (error) {
@@ -881,6 +890,20 @@ export class UpdateRouter {
       `📁 Now working in <code>${escapeHtml(wanted)}</code>.\n\n` +
         '🆕 Started a fresh conversation — a session keeps the directory it opened in.',
     )
+  }
+
+  /**
+   * Whether this conversation's own model reads images.
+   *
+   * Never fatal: an unanswerable question here means the refusal is decided
+   * the way it was before there was a model that could see.
+   */
+  private async modelSees(target: ChatTarget): Promise<boolean> {
+    try {
+      return (await this.options.modelSees?.(target)) === true
+    } catch {
+      return false
+    }
   }
 
   /** Send one plain notice into a conversation, swallowing delivery failures. */
