@@ -2,7 +2,7 @@
 
 <h1>dsh-telegram</h1>
 
-<p><strong>Ajak bicara agent-mu dari Telegram — dan benar-benar bisa menjawabnya saat ia bertanya.</strong></p>
+<p><strong>Ngobrol sama agent-mu lewat Telegram — dan bisa benar-benar menjawab waktu dia bertanya.</strong></p>
 
 <p>
   <a href="https://github.com/ashafizullah/dsh-telegram/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ashafizullah/dsh-telegram/actions/workflows/ci.yml/badge.svg"></a>
@@ -19,46 +19,47 @@
 
 Antarmuka Telegram untuk [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
-Ajak bicara agent-mu dari ponsel — dan benar-benar bisa *menjawab* saat ia bertanya.
+Ngobrol sama agent-mu dari HP — dan bisa benar-benar *menjawab* waktu dia bertanya.
 
 ## Kenapa ini ada
 
-Menjalankan agent dari aplikasi chat mentok di dua titik, dan plugin ini
-dibangun untuk membereskan keduanya.
+Menjalankan agent lewat aplikasi chat selalu mentok di dua hal. Plugin ini
+dibuat untuk membereskan keduanya.
 
-**Agent menulis markdown; Telegram menerimanya mentah.** Model menjawab dengan
-`**tebal**`, heading, tabel, checklist, dan blok kode. Dikirim sebagai teks
-biasa, semua itu sampai sebagai tanda bintang dan garis tegak literal.
+**Agent menulis markdown, Telegram menerimanya mentah-mentah.** Model menjawab
+pakai `**tebal**`, heading, tabel, checklist, blok kode. Kalau dikirim sebagai
+teks biasa, semua itu sampai ke kamu sebagai tumpukan bintang dan garis tegak.
 
-Sejak Bot API 10.1 Telegram mem-parse markdown sendiri, jadi plugin ini
-meneruskan balasan agent hampir apa adanya lewat `sendRichMessage` — tabel
-tampil sebagai tabel, checklist sebagai checklist — dan batas pesan naik dari
-4096 ke 32768 karakter.
+Sejak Bot API 10.1, Telegram sudah bisa mem-parse markdown sendiri. Jadi plugin
+ini meneruskan jawaban agent hampir apa adanya lewat `sendRichMessage` — tabel
+tampil sebagai tabel, checklist sebagai checklist — dan batas pesannya naik dari
+4096 jadi 32768 karakter.
 
-**Agent bertanya; tidak ada tempat untuk menjawabnya.** Saat agent memanggil
-`ask_user_question`, atau sebuah tool butuh izinmu, harness berhenti dan
-menunggu sebuah UI menjawab. Hanya browser yang bisa. Percakapan yang
-seluruhnya di Telegram akan tersangkut di pertanyaan pertama tanpa jalan
-keluar. Plugin ini mendaftarkan dirinya sebagai UI itu, jadi pertanyaan dan
-permintaan izin datang sebagai tombol di chat.
+**Agent bertanya, tapi tidak ada tempat buat menjawab.** Waktu agent memanggil
+`ask_user_question`, atau ada tool yang butuh izinmu, harness berhenti dan
+menunggu ada UI yang menjawab. Selama ini cuma browser yang bisa. Artinya
+percakapan yang seluruhnya di Telegram bakal mandek di pertanyaan pertama, dan
+tidak ada cara keluar. Plugin ini mendaftarkan diri sebagai UI itu, jadi
+pertanyaan dan permintaan izin muncul sebagai tombol langsung di chat.
 
-## Kebutuhan
+## Yang kamu butuhkan
 
 - DeepSeek Harness dengan profile yang bisa ditambahi plugin
-- **Bot API 10.1 atau lebih baru**, untuk `sendRichMessage` dan `sendRichMessageDraft`
-- Node 22 atau lebih baru
+- **Bot API 10.1 ke atas**, untuk `sendRichMessage` dan `sendRichMessageDraft`
+- Node 22 ke atas
 
-Tidak ada jalur cadangan HTML. Parser rich markdown Telegram pemaaf — code
-fence yang belum ditutup atau baris berisi marker berantakan tetap diterima,
-bukan ditolak — jadi frame di tengah stream tidak membutuhkannya.
+Tidak ada mode cadangan HTML, dan memang tidak perlu. Parser markdown Telegram
+cukup pemaaf — blok kode yang belum ditutup atau baris penuh simbol berantakan
+tetap diterima, bukan ditolak — jadi potongan yang muncul di tengah streaming
+aman-aman saja.
 
-## Pemasangan
+## Cara pasang
 
 ```bash
 npx @deepseek-ai/dsh plugin --profile web add -w @ashafizullah/dsh-telegram
 ```
 
-Atau dari checkout, kalau mau ikut mengembangkannya:
+Atau langsung dari source, kalau kamu mau ikut ngoprek:
 
 ```bash
 git clone https://github.com/ashafizullah/dsh-telegram.git
@@ -68,14 +69,14 @@ pnpm install && pnpm build
 npx @deepseek-ai/dsh plugin --profile web add -w "$(pwd)"
 ```
 
-Lalu beri token bot. Buat bot lewat [@BotFather](https://t.me/BotFather) dan
-simpan tokennya di bawah referensi kredensial — jangan pernah di berkas config:
+Habis itu kasih token bot. Bikin bot lewat [@BotFather](https://t.me/BotFather),
+lalu simpan tokennya sebagai kredensial — jangan pernah ditaruh di file config:
 
 ```bash
 npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 ```
 
-Jalankan profile-nya. Konsol akan mencetak kode klaim:
+Jalankan profile-nya. Di konsol akan muncul kode klaim:
 
 ```
 [dsh-telegram] this bot has no owner yet. Message @your_bot with:
@@ -83,29 +84,30 @@ Jalankan profile-nya. Konsol akan mencetak kode klaim:
     /claim 3f9a2b1c
 ```
 
-Kirim itu ke bot-mu dan bot itu jadi milikmu. Sebelum itu, ia tidak menjawab
+Kirim itu ke bot-mu, dan bot itu jadi milikmu. Sebelum itu dia tidak menjawab
 siapa pun.
 
-Kodenya juga ditulis ke `$DSH_HOME/dsh-telegram/claim-code.txt` dengan izin
-hanya-pemilik, karena beberapa profile tidak mengomposisi sink konsol sama
-sekali — dan kode yang tak bisa dibaca membuat bot mustahil dipakai.
+Kodenya juga ditulis ke `$DSH_HOME/dsh-telegram/claim-code.txt` dan cuma bisa
+dibaca pemiliknya. Soalnya ada profile yang sama sekali tidak menyiapkan output
+konsol — kalau kodenya tidak bisa dibaca siapa pun, bot-nya jadi mustahil
+dipakai.
 
 ## Akses
 
-Bot Telegram bisa dihubungi siapa pun yang tahu handle-nya, dan agent di
-belakangnya bisa menjalankan perintah shell di mesinmu. Jadi bawaannya
-tertutup.
+Bot Telegram bisa dihubungi siapa saja yang tahu username-nya, dan agent di
+baliknya bisa menjalankan perintah shell di komputermu. Makanya bawaannya
+tertutup rapat.
 
-- **Alur klaim** (bawaan): orang pertama yang mengirim kode dari konsol menjadi
-  pemilik. Kepemilikan bersifat durable dan sekali saja — klaim berikutnya
-  ditolak walau kodenya benar, jadi kode yang bocor tidak memberi apa pun.
-- **Daftar izin**: isi `allowFrom` dengan daftar user ID Telegram untuk
-  melewati proses klaim sepenuhnya. Pakai `/whoami` untuk melihat ID-mu.
+- **Alur klaim** (bawaan): siapa pun yang pertama mengirim kode dari konsol jadi
+  pemiliknya. Kepemilikan ini permanen dan cuma sekali — klaim berikutnya
+  ditolak walaupun kodenya benar, jadi kode yang bocor tidak ada gunanya.
+- **Daftar izin**: isi `allowFrom` dengan user ID Telegram kalau kamu mau lewat
+  proses klaim sama sekali. Pakai `/whoami` buat tahu ID-mu.
 
-Kode klaim berubah setiap restart dan tidak pernah dikirim lewat Telegram.
+Kode klaimnya ganti tiap restart, dan tidak pernah dikirim lewat Telegram.
 
-Akses diperiksa sebelum apa pun yang lain, jadi tidak ada teks tanpa izin yang
-sampai ke agent — bahkan sebuah command sekalipun.
+Akses dicek paling awal, sebelum apa pun yang lain. Jadi tidak ada satu pun
+pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 
 ## Perintah
 
@@ -119,7 +121,7 @@ sampai ke agent — bahkan sebuah command sekalipun.
 | `/stop` | Batalkan apa pun yang sedang dikerjakan agent |
 | `/whoami` | User ID Telegram-mu |
 
-Apa pun selain itu diperlakukan sebagai prompt untuk agent.
+Selain itu, apa pun yang kamu ketik jadi prompt buat agent.
 
 ## Yang bisa kamu kirim
 
@@ -130,99 +132,102 @@ Apa pun selain itu diperlakukan sebagai prompt untuk agent.
 | Berkas teks — log, stack trace, source | Isinya dalam prompt, dipotong bila sangat panjang |
 | Voice note, audio, atau video | Catatan bahwa itu tidak bisa dibaca |
 
-Gambar melewati seam attachment harness, yang menerima PNG, JPEG, WebP, dan
-GIF. Sisanya secara eksplisit ditunda, jadi plugin ini mengatakannya alih-alih
-menerima pesan lalu diam-diam membuang isinya.
+Gambar disimpan lewat jalur lampiran harness, yang menerima PNG, JPEG, WebP,
+dan GIF. Format lain memang sengaja belum didukung di sana, jadi plugin ini
+bilang terus terang daripada menerima pesanmu lalu diam-diam membuang isinya.
 
-Seam itu juga menolak gambar yang sisi terpanjangnya melebihi
-`maxImageDimension` — bawaannya 2000 piksel — dan **setiap** screenshot ponsel
-setinggi layar melewatinya: 1179×2556 di iPhone, 1080×2400 di kebanyakan
-Android. Telegram mengirim satu foto dalam beberapa ukuran, jadi yang dipilih
-adalah ukuran terbesar yang **muat**, bukan yang terbesar yang ada; limitnya
-dibaca langsung dari store-nya sendiri supaya tidak ada salinan angka yang bisa
-melenceng. Kalau seam tetap menolak, ukuran berikutnya yang dicoba. Untuk
-gambar yang dikirim sebagai berkas — hanya ada satu ukuran, tidak ada yang bisa
-diturunkan — penolakannya menyebutkan limitnya dan menyarankan mengirimnya
-sebagai foto supaya Telegram menyediakan salinan yang lebih kecil.
+Jalur itu juga menolak gambar yang sisi terpanjangnya lewat dari
+`maxImageDimension` — bawaannya 2000 piksel. Masalahnya, **semua** screenshot HP
+setinggi layar pasti lewat: 1179×2556 di iPhone, 1080×2400 di kebanyakan
+Android. Untungnya Telegram mengirim satu foto dalam beberapa ukuran sekaligus,
+jadi yang dipakai adalah ukuran terbesar yang **muat**, bukan yang paling besar.
+Batasnya dibaca langsung dari penyimpanannya sendiri, biar tidak ada angka
+kembar yang bisa beda sendiri suatu hari. Kalau ternyata masih ditolak juga,
+ukuran di bawahnya yang dicoba. Khusus gambar yang kamu kirim sebagai file —
+ukurannya cuma satu, tidak ada yang bisa diturunkan — pesan penolakannya
+menyebutkan batasnya dan menyarankan kirim sebagai foto saja, biar Telegram yang
+menyediakan salinan lebih kecil.
 
-Berkas yang terlalu besar, atau gagal diunduh, menjadi catatan di prompt yang
-menjelaskan sebabnya — caption-mu tetap sampai ke agent.
+Kalau filenya kebesaran atau gagal diunduh, itu jadi catatan singkat di prompt
+yang menjelaskan kenapa — dan caption-mu tetap sampai ke agent.
 
-### Model harus bisa melihat
+### Modelnya harus bisa melihat
 
-Model yang tidak mendeklarasikan input gambar akan menolak **seluruh** request,
-jadi gambar diperiksa terhadap `inputModalities` sebelum dikirim. **Tidak ada
-model DeepSeek yang menerima gambar** — `deepseek-v4-flash` dan
-`deepseek-v4-pro` keduanya hanya teks — sehingga secara bawaan sebuah screenshot
-ditolak dengan kalimat yang menyebutkan apa yang akan berhasil, dan caption-mu
-tetap sampai ke agent.
+Model yang tidak mendukung input gambar akan menolak **seluruh** request, bukan
+cuma gambarnya. Makanya gambar dicek dulu ke `inputModalities` sebelum dikirim.
+**Tidak ada model DeepSeek yang bisa menerima gambar** — `deepseek-v4-flash` dan
+`deepseek-v4-pro` dua-duanya cuma teks. Jadi kalau belum diatur apa-apa,
+screenshot-mu ditolak dengan penjelasan model apa yang bakal berhasil, dan
+caption-mu tetap sampai ke agent.
 
-**Settings → Telegram → Attachments** menyediakan dropdown berisi model yang
-sudah kamu konfigurasi di Settings → Models. Pilih satu, dan gambar jadi bisa
-dibaca.
+Buka **Settings → Telegram → Attachments**, di situ ada dropdown berisi model
+yang sudah kamu tambahkan di Settings → Models. Pilih satu, dan gambar langsung
+bisa dibaca.
 
-Gambarnya sendiri tidak pernah masuk ke percakapanmu. Gambar itu dikirim ke
-sesi sekali-pakai di model tersebut, yang diminta mentranskrip setiap teks di
-dalamnya dan menjelaskan singkat gambar apa itu; jawabannya kembali sebagai teks
-biasa, dan **itulah** yang diterima percakapanmu, di bawah caption-mu sendiri.
-Sesi itu dibuang setelahnya — umurnya satu turn.
+Gambarnya sendiri tidak pernah masuk ke percakapanmu. Dia dikirim ke sesi
+sekali-pakai di model tadi, yang diminta menyalin semua teks di dalamnya dan
+menjelaskan singkat itu gambar apa. Jawabannya balik sebagai teks biasa, dan
+**itulah** yang masuk ke percakapanmu, di bawah caption-mu sendiri. Sesi tadi
+langsung dibuang — umurnya cuma satu turn.
 
-Perantaraan itulah intinya. Provider memeriksa seluruh riwayat request untuk
-gambar, jadi gambar yang tertinggal di sebuah percakapan mengikat percakapan itu
-ke model yang bisa melihat selamanya: satu screenshot, dan setiap turn
-berikutnya — sepolos apa pun teksnya — ikut berjalan di sana, jauh dari model
-yang kamu pilih dan tool yang dikonfigurasi di sekitarnya. Membacanya di tempat
-lain membuat riwayat tetap bersih dari gambar, sehingga percakapan tetap di
-tempatnya, tetap punya tool-nya, dan tidak pernah tersangkut.
+Muter-muter begitu justru itu intinya. Provider mengecek seluruh riwayat
+percakapan buat cari gambar, jadi satu gambar yang tertinggal di sana bakal
+mengunci percakapan itu ke model yang bisa melihat, selamanya. Sekali kamu
+kirim screenshot, semua pertanyaan sesudahnya — sepolos apa pun — ikut jalan di
+sana, jauh dari model yang kamu pilih dan tool-tool yang sudah kamu siapkan.
+Dengan membacanya di tempat lain, riwayatmu tetap bersih dari gambar. Jadi
+percakapanmu tidak pindah ke mana-mana, tool-nya tetap ada, dan tidak pernah
+nyangkut.
 
-Kalau tidak ada model vision yang dikonfigurasi, jalur ini tidak pernah
-tersentuh sama sekali: gambarnya ditolak bahkan sebelum diunduh, dengan kalimat
-yang menyebutkan model mana yang akan berhasil, dan caption-mu tetap sampai ke
-agent.
+Kalau kamu belum mengatur model vision sama sekali, jalur ini tidak pernah
+kepakai: gambarnya ditolak bahkan sebelum diunduh, lengkap dengan penjelasan
+model mana yang cocok, dan caption-mu tetap sampai ke agent.
 
-Kalau pembacaan sudah dicoba lalu gagal — model tidak bisa dihubungi, atau
-turn-nya habis waktu setelah dua menit — gambarnya dikirim apa adanya dan
-percakapan yang pindah ke model vision, secara durable, sampai `/new`. Itu
-cadangan, bukan rancangannya, dan prompt-nya menyebutkan mana yang terjadi.
+Kalau pembacaannya sudah dicoba tapi gagal — modelnya tidak bisa dihubungi, atau
+kelamaan sampai lewat dua menit — gambarnya dikirim apa adanya, dan percakapanmu
+yang pindah ke model vision, menetap di sana sampai kamu `/new`. Itu jalan
+darurat, bukan rancangan aslinya, dan prompt-nya menyebutkan yang mana yang
+terjadi.
 
-Katalog yang bisa dibaca browser tidak membawa informasi modalitas, jadi
-dropdown itu tidak bisa menandai model mana yang menerima gambar. Host yang
-memeriksanya saat gambar benar-benar dikirim — satu-satunya tempat jawabannya
-pasti. Model vision sampai ke harness lewat provider yang membawanya, misalnya
-route OpenAI-compatible yang ditambahkan di Settings → Models, yang entri
-model-nya mendeklarasikan `input: [text, image]`.
+Katalog model yang bisa dibaca browser tidak menyimpan info modalitas, jadi
+dropdown-nya tidak bisa menandai model mana yang menerima gambar. Yang mengecek
+itu host, waktu gambarnya benar-benar dikirim — cuma di situ jawabannya pasti.
+Model vision masuk ke harness lewat provider yang membawanya, misalnya route
+OpenAI-compatible yang kamu tambahkan di Settings → Models, yang entri modelnya
+menyebut `input: [text, image]`.
 
-### Saat percakapan tersangkut
+### Kalau percakapan nyangkut
 
-Sebuah turn bisa gagal dengan cara yang tidak bisa diperbaiki dengan mencoba
-lagi — paling sering justru yang itu: pesan sebelumnya membawa konten yang tidak
-diterima model saat ini, dan tidak ada yang kamu ketik berikutnya bisa
-mengubahnya. Bot mengenali kasus semacam itu, mengatakan apa yang gagal, dan
-menawarkan tombol untuk memulai percakapan baru. Meminta pengguna mengingat
-`/new` sama saja meminta mereka mendiagnosis plugin ini.
+Kadang sebuah turn gagal dengan cara yang tidak akan sembuh walau dicoba
+berkali-kali — dan paling sering ya kasus di atas: ada pesan lama yang membawa
+sesuatu yang tidak diterima model sekarang, dan tidak ada yang bisa kamu ketik
+untuk memperbaikinya. Bot mengenali kasus seperti itu, memberi tahu apa yang
+gagal, lalu menawarkan tombol buat mulai percakapan baru. Menyuruh orang ingat
+`/new` sendiri sama saja menyuruh mereka mendiagnosis plugin ini.
 
-Kegagalan yang mungkin sembuh sendiri dilaporkan tanpa tombol, karena untuk
-yang itu mencoba lagi memang tindakan yang benar.
+Kegagalan yang mungkin sembuh sendiri dilaporkan tanpa tombol, karena buat yang
+itu mencoba lagi memang tindakan yang benar.
 
-## Mengaturnya
+## Cara mengaturnya
 
 Buka **Settings → Telegram** di UI web harness. Halaman itu menulis langsung ke
-settings document — tidak ada tombol Save, karena host menerapkan perubahan
-dengan menyambung ulang, dan form yang menahan draft akan membuat halaman dan
-bot yang sedang jalan berbeda pendapat soal apa yang aktif.
+settings document — tidak ada tombol Save, karena perubahan yang tersimpan
+langsung diterapkan host dengan menyambung ulang. Kalau formnya menahan draft
+dulu, halaman dan bot yang sedang jalan bisa beda persepsi soal apa yang aktif.
 
-Token bot adalah pengecualian. Ia rahasia, jadi tidak pernah melewati jalur
-settings ke arah mana pun: halaman hanya tahu *apakah* ada token tersimpan,
-menulisnya lewat domain credentials, dan menolak menawarkan pengeditan untuk
-referensi yang sudah disediakan environment — menulis di sana akan terlihat
-berhasil padahal resolusi tetap mengembalikan nilai environment.
+Token bot pengecualian. Dia rahasia, jadi tidak pernah lewat jalur settings, ke
+arah mana pun. Halaman itu cuma tahu *ada atau tidaknya* token tersimpan,
+menulisnya lewat jalur credentials, dan menolak menawarkan edit untuk referensi
+yang sudah disediakan environment — kalau dipaksakan, tulisannya bakal kelihatan
+berhasil padahal yang kepakai tetap nilai dari environment.
 
-Semua yang ada di halaman itu sama-sama bisa diatur lewat profile patch, untuk
-deployment yang dikonfigurasi lewat berkas.
+Semua yang ada di halaman itu bisa juga diatur lewat profile patch, buat
+deployment yang mengatur segalanya lewat file.
 
 ## Konfigurasi
 
-Setiap field punya bawaan yang bekerja; config kosong tetap jalan.
+Semua field punya nilai bawaan yang sudah jalan; config kosong pun tidak
+masalah.
 
 | Kunci | Bawaan | Arti |
 | --- | --- | --- |
@@ -245,30 +250,31 @@ Setiap field punya bawaan yang bekerja; config kosong tetap jalan.
 
 ## Diagnostik
 
-`ctx.logger` menulis ke sink apa pun yang dikomposisi deployment, dan beberapa
-profile tidak mengomposisi satu pun — jadi plugin yang hanya mencatat
-kegagalannya ke log sebenarnya bisu. Yang ini juga menulis keadaannya ke
-`$DSH_HOME/dsh-telegram/status.json` pada setiap transisi:
+`ctx.logger` menulis ke mana pun deployment-mu mengarahkannya, dan ada beberapa
+profile yang tidak mengarahkannya ke mana-mana — artinya plugin yang cuma
+mencatat kegagalan ke log sebenarnya bisu. Makanya plugin ini juga menulis
+keadaannya ke `$DSH_HOME/dsh-telegram/status.json` setiap kali berubah:
 
 ```json
 { "state": "connected", "bot": "your_bot", "updatedAt": "..." }
 ```
 
-`connecting`, `connected`, `idle` dengan alasan, `failed` dengan alasan. Token
-bot tidak pernah muncul di sana.
+Isinya `connecting`, `connected`, `idle` beserta alasannya, atau `failed`
+beserta alasannya. Token bot tidak pernah ikut muncul di sana.
 
-## Hidup berdampingan dengan UI web
+## Berdampingan dengan UI web
 
-Harness hanya mengizinkan **satu** provider user-questions, dan di profile yang
-juga menjalankan aplikasi web, browser sudah mengambilnya. Plugin ini mengambil
-alih slot itu dan menyimpan provider browser sebagai cadangan: pertanyaan milik
-sesi browser diteruskan kembali ke sana, dan yang milik percakapan Telegram jadi
-tombol di chat. Melepas plugin ini mengembalikan susunan sebelumnya persis.
+Harness cuma mengizinkan **satu** provider user-questions, dan di profile yang
+sekalian menjalankan aplikasi web, browser sudah keburu mengambilnya. Plugin ini
+mengambil alih slot itu tapi tetap menyimpan provider browser sebagai cadangan:
+pertanyaan yang berasal dari sesi browser diteruskan balik ke sana, dan yang
+berasal dari percakapan Telegram jadi tombol di chat. Kalau plugin ini dilepas,
+susunannya balik persis seperti semula.
 
-Permintaan izin memang komposabel — harness menjalankannya sebagai waterfall —
-jadi plugin ini menjawab untuk sesinya sendiri dan meneruskan sisanya.
+Permintaan izin lebih mudah, karena harness memang menjalankannya berantai. Jadi
+plugin ini menjawab untuk sesinya sendiri dan meneruskan sisanya.
 
-## Bagaimana semuanya tersambung
+## Cara kerjanya
 
 ```
 Telegram Bot API
@@ -285,43 +291,45 @@ UpdatePoller ──► UpdateRouter ──┬──► SessionRunner ──► c
 ctx.on('session/event') ──┬──► VisionExtractor   (sesi pembacaannya sendiri)
                           └──► TurnBridge ──► RichReplyStream ──► sendRichMessage
 
-TypingIndicator          (ditahan router dan bridge sampai balasan tampil)
+TypingIndicator          (ditahan router dan bridge sampai balasan muncul)
 ```
 
-### Bagaimana balasan di-stream
+### Cara jawaban ditampilkan sambil ditulis
 
-Telegram menyediakan dua mekanisme, dan keduanya tidak saling menggantikan:
+Telegram punya dua mekanisme, dan keduanya tidak bisa saling menggantikan:
 
-- **Chat privat** memakai `sendRichMessageDraft` — preview efemeral yang
-  beranimasi antar frame yang berbagi satu draft id. Ia kedaluwarsa 30 detik
-  setelah frame terakhir, jadi ada heartbeat yang mengirim ulang teks saat ini
-  selama tool call yang panjang; tanpa itu preview-nya lenyap dan bot terlihat
-  mati. Draft tidak pernah tersimpan, jadi turn diakhiri dengan
-  `sendRichMessage` sungguhan.
-- **Grup tidak punya API draft.** Di sana balasan jadi langsung dikirim begitu
-  siap.
+- **Chat pribadi** pakai `sendRichMessageDraft` — semacam preview sementara yang
+  beranimasi antar potongan yang punya draft id sama. Preview ini hangus 30
+  detik setelah potongan terakhir, jadi ada heartbeat yang mengirim ulang teks
+  terkini selama tool call yang lama; tanpa itu preview-nya hilang dan bot
+  kelihatan mati. Draft tidak pernah tersimpan, jadi turn-nya selalu ditutup
+  dengan `sendRichMessage` beneran.
+- **Grup tidak punya API draft sama sekali.** Di sana jawabannya langsung
+  dikirim begitu selesai.
 
-Keduanya berakhir dengan satu rich message permanen.
+Dua-duanya berakhir jadi satu rich message permanen.
 
-### Tidak ada yang dikirim sebelum ada yang layak dikatakan
+### Tidak ada yang dikirim sebelum ada yang layak dibilang
 
-Indikator "typing…" bawaan Telegram yang menanggung masa tunggunya, dan balasan
-baru muncul setelah ada isinya — kata pertama, atau nama tool yang dipakai
-agent. Titik tiga yang dikirim begitu turn dibuka hanya memberitahu pengguna hal
-yang sudah mereka tahu, dan di grup itu jadi pesan permanen yang mengatakannya.
+Masa tunggunya ditanggung indikator "typing…" bawaan Telegram, dan balasannya
+baru muncul setelah benar-benar ada isinya — kata pertama, atau nama tool yang
+lagi dipakai agent. Titik tiga yang muncul begitu turn dibuka cuma memberitahu
+hal yang sudah kamu tahu, dan di grup itu malah jadi pesan permanen yang
+mengatakannya.
 
-Indikatornya **ditahan**, bukan dikirim sekali. `sendChatAction` habis setelah
-lima detik — lebih pendek dari hampir semua hal yang layak ditunggu di sini:
-mengunduh berkas, membaca gambar di model vision, turn yang mengantre di
-belakang turn sebelumnya, atau satu menit di dalam tool call — jadi satu panggilan
-terbaca sebagai bot yang mulai lalu mati. Tahanan dihitung per percakapan dan
-dikirim ulang di dalam masa berlakunya sendiri, sehingga tahanan router saat
-membaca lampiran dan tahanan bridge atas turn sesudahnya bertumpang tindih
-dengan rapi, dan typing baru berhenti saat yang terakhir melepas. Ada batas
-sepuluh menit untuk berjaga-jaga kalau pelepasan tidak pernah datang.
+Indikatornya **ditahan terus**, bukan dikirim sekali. `sendChatAction` cuma
+bertahan lima detik — lebih pendek dari hampir semua hal yang bikin kamu
+menunggu di sini: mengunduh file, membaca gambar di model vision, turn yang
+masih ngantre di belakang turn sebelumnya, atau satu menit di dalam tool call.
+Jadi sekali panggil doang bakal kebaca seperti bot yang nyala sebentar terus
+mati. Sekarang tiap percakapan punya hitungannya sendiri dan indikatornya
+dikirim ulang sebelum sempat hangus, jadi masa tunggu waktu router membaca
+lampiran dan masa tunggu waktu turn-nya jalan bisa saling menyambung dengan
+rapi — typing baru berhenti waktu yang terakhir selesai. Ada batas sepuluh menit
+buat jaga-jaga kalau ada yang lupa berhenti.
 
-Selagi agent bekerja, tool yang sedang berjalan ditampilkan di atas balasan
-dalam blok `<tg-thinking>`:
+Selagi agent bekerja, tool yang sedang jalan ditampilkan di atas balasan dalam
+blok `<tg-thinking>`:
 
 ```
 ▸ bash: npm test
@@ -329,11 +337,12 @@ dalam blok `<tg-thinking>`:
 Ini yang saya temukan sejauh ini…
 ```
 
-Telegram menerima blok itu di draft dan tidak di tempat lain, yang persis cocok
-dengan masa hidupnya — ia hilang begitu turn dipermanenkan, jadi balasan akhir
-membawa jawabannya, bukan perancah yang menghasilkannya. Hanya satu baris
-terpotong: argumen sebuah tool bisa sepanjang satu berkas, dan tujuannya adalah
-tahu agent masih hidup, bukan membaca transkrip.
+Telegram cuma menerima blok itu di dalam draft, dan tidak di tempat lain — kebetulan
+persis sama dengan umur pakainya di sini. Blok itu hilang begitu turn-nya
+dipermanenkan, jadi balasan akhirnya berisi jawaban, bukan proses di baliknya.
+Isinya sengaja cuma satu baris pendek: argumen sebuah tool bisa sepanjang satu
+file utuh, sementara yang kamu butuhkan cuma tahu agent-nya masih hidup, bukan
+membaca transkrip.
 
 ## Pengembangan
 
@@ -341,41 +350,42 @@ tahu agent masih hidup, bukan membaca transkrip.
 pnpm install
 pnpm test          # 549 test
 pnpm test -- --coverage
-pnpm typecheck     # paruh host dan browser
+pnpm typecheck     # sisi host dan sisi browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser
 ```
 
-Setiap modul berjalan tanpa harness, dan itulah yang membuat suite-nya cepat:
-entry plugin diuji terhadap stub HTTP sungguhan dari Bot API, dan bundle browser
-dimaterialisasi persis seperti shell memateralisasinya.
+Semua modul bisa jalan tanpa harness, dan itu yang bikin test-nya cepat: entry
+plugin-nya diuji lawan stub HTTP Bot API sungguhan, dan bundle browser-nya
+dimuat persis seperti shell memuatnya.
 
-### Paruh browser
+### Sisi browser
 
-`build.client.mjs` membungkus bundle CJS hasil esbuild dalam envelope lazy-CJS
-factory milik shell (`window.__ModuleLoader__.load({ id, factory })`). Envelope
-itu direproduksi, bukan diimpor: preset `clientBundle` milik harness tidak
-dipublikasikan, dan dokumentasinya sendiri mencantumkan itu sebagai keterbatasan
-untuk plugin di luar repo mereka.
+`build.client.mjs` membungkus bundle CJS hasil esbuild ke dalam pembungkus
+lazy-CJS factory milik shell (`window.__ModuleLoader__.load({ id, factory })`).
+Pembungkus itu ditulis ulang, bukan diimpor: preset `clientBundle` milik harness
+memang tidak dipublikasikan, dan dokumentasinya sendiri mencantumkan itu sebagai
+keterbatasan untuk plugin di luar repo mereka.
 
-Karena itu, di sinilah satu-satunya tempat plugin ini terikat ke format
-internal, dan `test/client-bundle.test.ts` menguncinya — test itu menjalankan
-build, memateralisasi factory-nya dengan `require` tiruan, lalu memastikan
-`apply` mengambil kursi settings-nya. Rilis harness yang mengubah format itu
-akan gagal di sana dengan nama yang jelas, bukan muncul sebagai halaman Settings
-yang kosong.
+Jadi di sinilah satu-satunya tempat plugin ini terikat ke format internal, dan
+`test/client-bundle.test.ts` yang menguncinya — test itu menjalankan build,
+memuat factory-nya pakai `require` tiruan, lalu memastikan `apply` benar-benar
+mengambil kursi settings-nya. Kalau rilis harness berikutnya mengubah formatnya,
+yang gagal adalah test itu, dengan nama yang jelas — bukan muncul belakangan
+sebagai halaman Settings yang kosong melompong.
 
-React dan paket milik shell ditandai external; membundel React kedua akan
-merusak setiap hook begitu halaman ter-mount.
+React dan paket-paket milik shell ditandai external. Kalau sampai ada React
+kedua ikut terbundel, semua hook rusak begitu halamannya ter-mount.
 
-## Keterbatasan yang diketahui
+## Yang belum bisa
 
-- **Grup belum punya gating.** Di grup, bot menjawab setiap pesan dari pengguna
+- **Grup belum ada filternya.** Di grup, bot menjawab semua pesan dari orang
   yang ada di daftar izin — tanpa perlu di-mention atau di-reply.
-- **Reasoning effort belum terbawa.** Hanya provider dan model yang sampai ke
-  sesi Telegram; effort yang dipilih di Settings → Models tidak.
-- **Satu working directory.** Semua percakapan dimulai di `cwd` yang sama.
-- **Belum ada voice, audio, atau video.** Seam attachment harness hanya
-  menerima gambar.
+- **Reasoning effort belum ikut terbawa.** Cuma provider dan model yang sampai
+  ke sesi Telegram; effort yang kamu pilih di Settings → Models tidak.
+- **Working directory-nya cuma satu.** Semua percakapan mulai dari `cwd` yang
+  sama.
+- **Belum bisa voice, audio, atau video.** Jalur lampiran harness cuma menerima
+  gambar.
 
 ## Lisensi
 
