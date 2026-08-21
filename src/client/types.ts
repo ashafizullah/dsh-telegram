@@ -70,8 +70,12 @@ export interface ClientContext {
   settingsScope: {
     bind<T>(spec: { namespace: string; decode?: (section: unknown) => T | undefined }): SettingsScope<T>
   }
-  /** Generated remotes; this plugin uses only the credentials domain. */
-  remote: CredentialsRemote
+  /**
+   * Service lookup. The wire face lives on the connection service as
+   * `connection.api` — `ctx.remote` carries the forwarded-event face instead,
+   * and reaching for it here would leave the token control silently inert.
+   */
+  get(key: 'connection'): { api: CredentialsRemote } | undefined
   effect(callback: () => (() => void) | void, label?: string): () => void
 }
 

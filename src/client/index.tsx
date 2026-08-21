@@ -42,8 +42,12 @@ export function apply(ctx: ClientContext): void {
   // the settings subscription.
   const scope = ctx.settingsScope.bind<TelegramSettings>({ namespace: NAMESPACE })
 
+  // The credentials wire rides the connection service, not ctx.remote.
+  const connection = ctx.get('connection')
+
   const Section = function TelegramSection() {
-    return <TelegramPanel scope={scope} remote={ctx.remote} t={translate} />
+    if (!connection) return null
+    return <TelegramPanel scope={scope} remote={connection.api} t={translate} />
   }
 
   ctx.slots.inject('settings.section', () =>

@@ -98,7 +98,7 @@ describe('client bundle — what the factory produces', () => {
       locale: { register: vi.fn(), bind: () => (key: string) => key },
       settingsScope: { bind: () => ({ getSnapshot: () => ({}), subscribe: () => () => undefined }) },
       slots: { register: registerSlot, inject },
-      remote: {},
+      get: () => ({ api: { credentials: {} } }),
     })
 
     expect(inject).toHaveBeenCalledWith('settings.section', expect.any(Function))
@@ -116,7 +116,7 @@ describe('client bundle — what the factory produces', () => {
       locale: { register: vi.fn(), bind: () => (key: string) => key },
       settingsScope: { bind },
       slots: { register: vi.fn(), inject: (_n: string, e: () => unknown) => void e() },
-      remote: {},
+      get: () => ({ api: { credentials: {} } }),
     })
 
     expect(bind).toHaveBeenCalledWith({ namespace: 'telegram' })
@@ -130,7 +130,7 @@ describe('client bundle — what the factory produces', () => {
       locale: { register, bind: () => (key: string) => key },
       settingsScope: { bind: () => ({ getSnapshot: () => ({}), subscribe: () => () => undefined }) },
       slots: { register: vi.fn(), inject: (_n: string, e: () => unknown) => void e() },
-      remote: {},
+      get: () => ({ api: { credentials: {} } }),
     })
 
     expect(register).toHaveBeenCalledWith('telegram', expect.objectContaining({ 'en-US': expect.anything() }))
