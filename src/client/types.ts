@@ -79,13 +79,33 @@ export interface ClientContext {
   effect(callback: () => (() => void) | void, label?: string): () => void
 }
 
+/**
+ * Every remote call answers with an envelope, not the payload.
+ *
+ * A refusal the host reasoned about — an absent provider, a rejected value —
+ * arrives as a resolved `ok: false`, not a rejection. Reading the payload
+ * straight off the answer silently yields undefined for every field, which
+ * reads as "nothing is configured and nothing is writable".
+ */
+export type RemoteAnswer<T> = {
+  result: { ok: true; value: T } | { ok: false; error: { message: string } }
+}
+
+/** What the host knows about one credential reference. Never its value. */
+export interface CredentialInfo {
+  readonly configured: boolean
+  /** Where it comes from: `env` shadows the managed file and cannot be written. */
+  readonly source?: string
+  readonly writable: boolean
+}
+
 /** The credential calls the token control needs. */
 export interface CredentialsRemote {
   credentials: {
-    describe(payload: { refs: string[] }): Promise<{
-      credentials: Record<string, { configured: boolean; source?: string; writable: boolean }>
-    }>
-    set(payload: { ref: string; value: string }): Promise<unknown>
-    unset(payload: { ref: string }): Promise<unknown>
+    describe(payload: {
+      refs: string[]
+    }): Promise<RemoteAnswer<{ credentials: Record<string, CredentialInfo> }>>
+    set(payload: { ref: string; value: string }): Promise<RemoteAnswer<unknown>>
+    unset(payload: { ref: string }): Promise<RemoteAnswer<unknown>>
   }
 }

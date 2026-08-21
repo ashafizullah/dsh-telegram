@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 
 import { FILL, TEXT, Toggle } from '../src/client/fields.js'
+import { presentToken } from '../src/client/panel.js'
 
 /**
  * A React element is a plain object, so a component's rendered style can be
@@ -117,6 +118,73 @@ describe('theme tokens', () => {
   it('gives every token a fallback, for a shell that defines none', () => {
     for (const token of [...Object.values(TEXT), ...Object.values(FILL)]) {
       expect(token, token).toMatch(/^var\(--dsw-[a-z0-9-]+,\s*.+\)$/)
+    }
+  })
+})
+
+describe('presentToken', () => {
+  it('says it is checking before the host has answered', () => {
+    const view = presentToken({ kind: 'checking' }, false)
+    expect(view.hint).toBe('tokenChecking')
+    expect(view.editable).toBe(false)
+  })
+
+  it('reports a failed check as a failed check, not as a cause it invented', () => {
+    // The original bug: a describe whose answer was read wrongly produced
+    // "supplied by the environment" — a confident, false explanation.
+    const view = presentToken({ kind: 'unknown', reason: 'wire closed' }, false)
+    expect(view.hint).toBe('tokenCheckFailed')
+    expect(view.params).toEqual({ reason: 'wire closed' })
+    expect(view.retryable).toBe(true)
+  })
+
+  it('offers a way to check again after a failure', () => {
+    expect(presentToken({ kind: 'unknown', reason: 'x' }, false).retryable).toBe(true)
+  })
+
+  it('names the environment only when the host says the value comes from it', () => {
+    const view = presentToken(
+      { kind: 'known', configured: true, writable: false, source: 'env' },
+      false,
+    )
+    expect(view.hint).toBe('tokenFromEnvironment')
+    expect(view.editable).toBe(false)
+  })
+
+  it('says read-only, without guessing why, for any other unwritable source', () => {
+    const view = presentToken({ kind: 'known', configured: true, writable: false }, false)
+    expect(view.hint).toBe('tokenReadOnly')
+  })
+
+  it('lets a stored, writable token be replaced or removed', () => {
+    const view = presentToken(
+      { kind: 'known', configured: true, writable: true, source: 'file' },
+      false,
+    )
+    expect(view.hint).toBe('tokenConfigured')
+    expect(view.editable).toBe(true)
+    expect(view.removable).toBe(true)
+  })
+
+  it('invites a first token when none is stored', () => {
+    const view = presentToken({ kind: 'known', configured: false, writable: true }, false)
+    expect(view.hint).toBe('tokenMissing')
+    expect(view.editable).toBe(true)
+    expect(view.removable).toBe(false)
+  })
+
+  it('offers no edit while the settings document itself is locked', () => {
+    const view = presentToken({ kind: 'known', configured: true, writable: true }, true)
+    expect(view.editable).toBe(false)
+    expect(view.removable).toBe(false)
+  })
+
+  it('never claims the environment supplies a token it could not check', () => {
+    for (const state of [
+      { kind: 'checking' } as const,
+      { kind: 'unknown', reason: 'boom' } as const,
+    ]) {
+      expect(presentToken(state, false).hint).not.toBe('tokenFromEnvironment')
     }
   })
 })

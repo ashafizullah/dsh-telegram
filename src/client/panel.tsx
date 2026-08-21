@@ -223,6 +223,74 @@ function Page(props: { t: (key: LocaleKey) => string; children: React.ReactNode 
 }
 
 /**
+ * What the token control knows, and what it is allowed to say.
+ *
+ * Three states, kept apart on purpose. Conflating "the check failed" with "the
+ * host says it is read-only" is how this control came to announce that a token
+ * was supplied by the environment when in truth the answer had simply not been
+ * read correctly — a confident, wrong explanation is worse than no explanation.
+ */
+export type TokenState =
+  | { kind: 'checking' }
+  | { kind: 'unknown'; reason: string }
+  | { kind: 'known'; configured: boolean; writable: boolean; source?: string }
+
+/** How the control should present one token state. */
+export interface TokenPresentation {
+  readonly hint: LocaleKey
+  readonly params?: Record<string, unknown>
+  /** Whether the user may type a new token. */
+  readonly editable: boolean
+  /** Whether to offer re-running the check. */
+  readonly retryable: boolean
+  /** Whether to offer removing the stored token. */
+  readonly removable: boolean
+}
+
+/**
+ * Decide what to show for a token state.
+ *
+ * Pure, so the decision is testable without a browser — which is where the
+ * wrong message lived last time.
+ *
+ * @param state - what the host answered, or that it did not.
+ * @param locked - whether the settings document itself refuses writes.
+ */
+export function presentToken(state: TokenState, locked: boolean): TokenPresentation {
+  if (state.kind === 'checking') {
+    return { hint: 'tokenChecking', editable: false, retryable: false, removable: false }
+  }
+
+  if (state.kind === 'unknown') {
+    return {
+      hint: 'tokenCheckFailed',
+      params: { reason: state.reason },
+      editable: false,
+      retryable: true,
+      removable: false,
+    }
+  }
+
+  if (!state.writable) {
+    // Only the environment layer is worth naming; anything else is just
+    // read-only, and guessing which would repeat the original mistake.
+    return {
+      hint: state.source === 'env' ? 'tokenFromEnvironment' : 'tokenReadOnly',
+      editable: false,
+      retryable: false,
+      removable: false,
+    }
+  }
+
+  return {
+    hint: state.configured ? 'tokenConfigured' : 'tokenMissing',
+    editable: !locked,
+    retryable: false,
+    removable: state.configured && !locked,
+  }
+}
+
+/**
  * The bot token.
  *
  * Only ever reports whether one is stored — a secret never rides back over the
@@ -233,33 +301,50 @@ function Page(props: { t: (key: LocaleKey) => string; children: React.ReactNode 
 function TokenRow(props: {
   ref_: string
   remote: CredentialsRemote
-  t: (key: LocaleKey) => string
+  t: (key: LocaleKey, params?: Record<string, unknown>) => string
   locked: boolean
 }) {
   const { ref_, remote, t } = props
-  const [state, setState] = useState<{ configured: boolean; writable: boolean } | undefined>()
+  const [state, setState] = useState<TokenState>({ kind: 'checking' })
   const [draft, setDraft] = useState('')
   const [saved, setSaved] = useState(false)
   const [failure, setFailure] = useState<string | undefined>()
 
   const refresh = useCallback(() => {
+    setState({ kind: 'checking' })
     void remote.credentials
       .describe({ refs: [ref_] })
       .then((answer) => {
-        const info = answer.credentials[ref_]
-        setState({ configured: info?.configured ?? false, writable: info?.writable ?? false })
+        if (!answer.result.ok) {
+          return setState({ kind: 'unknown', reason: answer.result.error.message })
+        }
+        const info = answer.result.value.credentials[ref_]
+        if (!info) {
+          return setState({ kind: 'known', configured: false, writable: true })
+        }
+        setState({
+          kind: 'known',
+          configured: info.configured,
+          writable: info.writable,
+          ...(info.source !== undefined ? { source: info.source } : {}),
+        })
       })
-      .catch(() => setState({ configured: false, writable: false }))
+      .catch((error: unknown) => {
+        setState({ kind: 'unknown', reason: error instanceof Error ? error.message : String(error) })
+      })
   }, [remote, ref_])
 
   useEffect(refresh, [refresh])
+
+  const view = presentToken(state, props.locked)
 
   const save = () => {
     if (draft === '') return
     setFailure(undefined)
     void remote.credentials
       .set({ ref: ref_, value: draft })
-      .then(() => {
+      .then((answer) => {
+        if (!answer.result.ok) return setFailure(answer.result.error.message)
         setDraft('')
         setSaved(true)
         refresh()
@@ -271,22 +356,16 @@ function TokenRow(props: {
     setFailure(undefined)
     void remote.credentials
       .unset({ ref: ref_ })
-      .then(() => {
+      .then((answer) => {
+        if (!answer.result.ok) return setFailure(answer.result.error.message)
         setSaved(false)
         refresh()
       })
       .catch((error: unknown) => setFailure(error instanceof Error ? error.message : String(error)))
   }
 
-  const shadowed = state !== undefined && !state.writable
-  const hint = shadowed
-    ? t('tokenFromEnvironment')
-    : state?.configured
-      ? t('tokenConfigured')
-      : t('tokenMissing')
-
   return (
-    <Row label={t('tokenTitle')} hint={hint}>
+    <Row label={t('tokenTitle')} hint={t(view.hint, view.params)}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
         <div style={{ display: 'flex', gap: 8 }}>
           <TextInput
@@ -295,14 +374,15 @@ function TokenRow(props: {
             onChange={setDraft}
             onCommit={save}
             placeholder={t('tokenPlaceholder')}
-            disabled={props.locked || shadowed}
+            disabled={!view.editable}
           />
-          <Button onClick={save} disabled={props.locked || shadowed || draft === ''}>
+          <Button onClick={save} disabled={!view.editable || draft === ''}>
             {t('tokenSave')}
           </Button>
         </div>
-        {state?.configured && !shadowed ? (
-          <Button onClick={remove} tone="danger" disabled={props.locked}>
+        {view.retryable ? <Button onClick={refresh}>{t('tokenRetry')}</Button> : null}
+        {view.removable ? (
+          <Button onClick={remove} tone="danger">
             {t('tokenClear')}
           </Button>
         ) : null}
