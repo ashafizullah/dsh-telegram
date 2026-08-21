@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { AccessPolicy } from './access.js'
+import { StatusFile, describeError } from './diagnostics.js'
 import { Config } from './config.js'
 import { TelegramApprovalAnswerer } from './interact/approvals.js'
 import { PendingRegistry } from './interact/pending.js'
@@ -32,7 +33,7 @@ import { TurnBridge } from './reply/turn-bridge.js'
 import { UpdateRouter } from './router.js'
 import { BindingStore } from './session/bindings.js'
 import { SessionRunner } from './session/runner.js'
-import { TelegramApi } from './telegram/api.js'
+import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
 import { resolveMessageFactory } from './harness/message.js'
@@ -45,6 +46,7 @@ import type {
   SettingsService,
   UserQuestionService,
 } from './harness/types.js'
+import type { BotUser } from './telegram/types.js'
 import type { SessionEvent } from './reply/turn-bridge.js'
 import type { TelegramConfig } from './config.js'
 
@@ -97,13 +99,17 @@ export function apply(ctx: PluginContext, config: TelegramConfig): void {
   let live = config
   let abort: AbortController | undefined
 
+  const status = new StatusFile(join(dataDirectory(), 'status.json'))
+
   /** (Re)open the connection under the configuration standing right now. */
   const run = () => {
     abort?.abort()
     abort = new AbortController()
     const signal = abort.signal
-    void start(ctx, live, logger, signal).catch((error: unknown) => {
-      if (!signal.aborted) logger.error('[dsh-telegram] failed to start', error)
+    void start(ctx, live, logger, signal, status).catch((error: unknown) => {
+      if (signal.aborted) return
+      logger.error('[dsh-telegram] failed to start', error)
+      void status.publish('failed', { detail: describeError(error) })
     })
   }
 
@@ -126,7 +132,19 @@ export function apply(ctx: PluginContext, config: TelegramConfig): void {
     if (!settings) return
 
     scope.effect(() => {
-      const bound = settings.register<TelegramConfig>(SETTINGS_NAMESPACE, Config, { base: config })
+      // A configuration surface that cannot bind must never take the bot
+      // offline with it — the connection is the point, the settings page is a
+      // convenience — so a failed registration is reported and stepped over.
+      let bound
+      try {
+        bound = settings.register<TelegramConfig>(SETTINGS_NAMESPACE, Config, { base: config })
+      } catch (error) {
+        logger.error('[dsh-telegram] could not register the settings namespace', error)
+        void status.publish('failed', {
+          detail: `settings namespace unavailable: ${describeError(error)}`,
+        })
+        return () => undefined
+      }
 
       // The resolved value may already differ from the composed one — a user
       // document was loaded before this ran — so adopt it before watching.
@@ -163,18 +181,23 @@ async function start(
   config: TelegramConfig,
   logger: Logger,
   signal: AbortSignal,
+  status: StatusFile,
 ): Promise<void> {
   if (!config.enabled) {
     logger.info('[dsh-telegram] disabled; not connecting')
+    await status.publish('idle', { detail: 'disabled in configuration' })
     return
   }
 
+  await status.publish('connecting')
+
   const token = await resolveToken(ctx, config.tokenRef)
   if (!token) {
-    logger.warn(
-      `[dsh-telegram] credential "${config.tokenRef}" is not set; the bot is idle. ` +
-        `Create one with @BotFather and store it under that reference.`,
-    )
+    const detail =
+      `credential "${config.tokenRef}" is not set. ` +
+      'Create a bot with @BotFather and store its token under that reference.'
+    logger.warn(`[dsh-telegram] ${detail} The bot is idle.`)
+    await status.publish('idle', { detail })
     return
   }
 
@@ -184,13 +207,8 @@ async function start(
     timeoutMs: config.timeoutMs,
   })
 
-  const me = await api.getMe()
-  logger.info(`[dsh-telegram] connected as @${me.username ?? me.id}`)
-
-  // getUpdates and webhooks are mutually exclusive; take the polling path.
-  await api.deleteWebhook().catch((error: unknown) => {
-    logger.warn('[dsh-telegram] could not clear an existing webhook', error)
-  })
+  const me = await openConnection(api, config, logger, signal, status)
+  if (!me) return
 
   const home = dataDirectory()
   const bindings = await BindingStore.open(join(home, 'bindings.json'))
@@ -270,11 +288,86 @@ async function start(
     longPollSeconds: config.longPollSeconds,
     baseDelayMs: config.reconnect.baseDelayMs,
     maxDelayMs: config.reconnect.maxDelayMs,
-    onConnected: () => logger.info('[dsh-telegram] listening for messages'),
+    onConnected: () => {
+      logger.info('[dsh-telegram] listening for messages')
+      void status.publish('connected', { bot: me.username ?? String(me.id) })
+    },
     logger,
   })
 
   await poller.run(signal)
+}
+
+/**
+ * Verify the token and take the polling path, retrying until it works.
+ *
+ * The receive loop already survives a dropped network; startup did not, and
+ * that asymmetry is what turns a momentary failure — a rate limit after a
+ * quick restart, a DNS blip, a laptop still waking — into a bot that stays
+ * silent until someone restarts the harness. Only a rejected token is final:
+ * retrying that would hammer Telegram forever with a credential that cannot
+ * become valid on its own.
+ *
+ * @returns the bot's identity, or undefined when the caller aborted.
+ */
+async function openConnection(
+  api: TelegramApi,
+  config: TelegramConfig,
+  logger: Logger,
+  signal: AbortSignal,
+  status: StatusFile,
+): Promise<BotUser | undefined> {
+  for (let attempt = 1; !signal.aborted; attempt += 1) {
+    try {
+      const me = await api.getMe()
+
+      // getUpdates and webhooks are mutually exclusive; take the polling path.
+      await api.deleteWebhook().catch((error: unknown) => {
+        logger.warn('[dsh-telegram] could not clear an existing webhook', error)
+      })
+
+      logger.info(`[dsh-telegram] connected as @${me.username ?? me.id}`)
+      await status.publish('connected', { bot: me.username ?? String(me.id) })
+      return me
+    } catch (error) {
+      if (signal.aborted) return undefined
+
+      if (error instanceof TelegramApiError && error.isAuthFailure) {
+        const detail = `the bot token was rejected: ${error.description ?? 'unauthorized'}`
+        logger.error(`[dsh-telegram] ${detail}`)
+        await status.publish('failed', { detail })
+        return undefined
+      }
+
+      const delay = Math.min(
+        config.reconnect.baseDelayMs * 2 ** Math.min(attempt - 1, 8),
+        config.reconnect.maxDelayMs,
+      )
+      logger.warn(`[dsh-telegram] could not connect; retrying in ${delay}ms`, error)
+      await status.publish('connecting', {
+        detail: `attempt ${attempt} failed: ${describeError(error)}`,
+      })
+      await sleep(delay, signal)
+    }
+  }
+
+  return undefined
+}
+
+/** Cancellable pause between connection attempts. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve()
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 /** Stream every Telegram-bound session's turns into its chat. */

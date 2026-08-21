@@ -15,6 +15,8 @@ import { Config, apply } from '../src/index.js'
 function botApiServer() {
   const calls: { method: string; body: Record<string, unknown> }[] = []
   const updates: unknown[][] = []
+  /** Scripted failures for getMe, consumed one per call. */
+  const getMeFailures: { status: number; description: string }[] = []
 
   const server: Server = createServer((request, response) => {
     let raw = ''
@@ -23,6 +25,15 @@ function botApiServer() {
       const method = (request.url ?? '').split('/').pop() ?? ''
       const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
       calls.push({ method, body })
+
+      if (method === 'getMe' && getMeFailures.length > 0) {
+        const failure = getMeFailures.shift() as { status: number; description: string }
+        response.writeHead(failure.status, { 'content-type': 'application/json' })
+        response.end(
+          JSON.stringify({ ok: false, error_code: failure.status, description: failure.description }),
+        )
+        return
+      }
 
       const result =
         method === 'getMe'
@@ -42,6 +53,9 @@ function botApiServer() {
     server,
     calls,
     queueUpdates: (batch: unknown[]) => void updates.push(batch),
+    failNextGetMe: (times: number, status = 500, description = 'Internal Server Error') => {
+      for (let i = 0; i < times; i += 1) getMeFailures.push({ status, description })
+    },
     listen: () =>
       new Promise<number>((resolve) => {
         server.listen(0, '127.0.0.1', () => {
@@ -49,7 +63,13 @@ function botApiServer() {
           resolve(typeof address === 'object' && address ? address.port : 0)
         })
       }),
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise<void>((resolve) => {
+        // The poll loop holds a keep-alive socket; without dropping it first,
+        // every test pays for the server's graceful close.
+        server.closeAllConnections()
+        server.close(() => resolve())
+      }),
     of: (method: string) => calls.filter((call) => call.method === method),
   }
 }
@@ -383,5 +403,114 @@ describe('apply — settings namespace', () => {
     apply(harness.ctx as never, config())
     await vi.waitFor(() => expect(harness.prompts).toEqual(['no settings here']))
     harness.stop()
+  })
+})
+
+
+describe('apply — surviving a bad start', () => {
+  /** Read the status file the plugin publishes for an unreadable log. */
+  async function status(): Promise<Record<string, unknown> | undefined> {
+    try {
+      const { readFile } = await import('node:fs/promises')
+      return JSON.parse(await readFile(join(home, 'dsh-telegram', 'status.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >
+    } catch {
+      return undefined
+    }
+  }
+
+  it('retries a failed handshake instead of staying silent until a restart', async () => {
+    const harness = fakeContext()
+    bot.failNextGetMe(2)
+    bot.queueUpdates([textUpdate(1, 'made it through')])
+
+    apply(harness.ctx as never, config({ reconnect: { baseDelayMs: 10, maxDelayMs: 20 } }))
+
+    await vi.waitFor(() => expect(harness.prompts).toEqual(['made it through']), { timeout: 5000 })
+    harness.stop()
+
+    expect(bot.of('getMe').length).toBeGreaterThan(2)
+  })
+
+  it('gives up on a rejected token, which retrying could never fix', async () => {
+    const harness = fakeContext()
+    bot.failNextGetMe(5, 401, 'Unauthorized')
+
+    apply(harness.ctx as never, config({ reconnect: { baseDelayMs: 10, maxDelayMs: 20 } }))
+    await vi.waitFor(async () => expect((await status())?.state).toBe('failed'), { timeout: 5000 })
+    harness.stop()
+
+    // One attempt, not five: an invalid token cannot become valid on its own.
+    expect(bot.of('getMe')).toHaveLength(1)
+  })
+
+  it('stops retrying when the plugin unloads', async () => {
+    const harness = fakeContext()
+    bot.failNextGetMe(50)
+
+    apply(harness.ctx as never, config({ reconnect: { baseDelayMs: 10, maxDelayMs: 20 } }))
+    await vi.waitFor(() => expect(bot.of('getMe').length).toBeGreaterThan(0))
+    harness.stop()
+
+    const settled = bot.of('getMe').length
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    expect(bot.of('getMe').length).toBe(settled)
+  })
+})
+
+describe('apply — the status file', () => {
+  async function status(): Promise<Record<string, unknown> | undefined> {
+    try {
+      const { readFile } = await import('node:fs/promises')
+      return JSON.parse(await readFile(join(home, 'dsh-telegram', 'status.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >
+    } catch {
+      return undefined
+    }
+  }
+
+  it('reports a live connection, naming the bot', async () => {
+    const harness = fakeContext()
+    apply(harness.ctx as never, config())
+
+    await vi.waitFor(async () => expect((await status())?.state).toBe('connected'))
+    harness.stop()
+
+    expect((await status())?.bot).toBe('test_bot')
+  })
+
+  it('says why it is idle when no token is configured', async () => {
+    const harness = fakeContext()
+    harness.ctx.credentials = { resolve: async () => undefined }
+
+    apply(harness.ctx as never, config())
+    await vi.waitFor(async () => expect((await status())?.state).toBe('idle'))
+    harness.stop()
+
+    expect(String((await status())?.detail)).toContain('TELEGRAM_BOT_TOKEN')
+  })
+
+  it('says so when it is switched off', async () => {
+    const harness = fakeContext()
+    apply(harness.ctx as never, config({ enabled: false }))
+
+    await vi.waitFor(async () => expect((await status())?.state).toBe('idle'))
+    harness.stop()
+
+    expect(String((await status())?.detail)).toContain('disabled')
+  })
+
+  it('never writes the token into the file', async () => {
+    const harness = fakeContext()
+    apply(harness.ctx as never, config())
+
+    await vi.waitFor(async () => expect((await status())?.state).toBe('connected'))
+    harness.stop()
+
+    expect(JSON.stringify(await status())).not.toContain('TEST-TOKEN')
   })
 })
