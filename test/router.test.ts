@@ -14,7 +14,7 @@ const OWNER = 7
 const STRANGER = 99
 
 /** A router wired to spies, with a real access policy in a temp directory. */
-async function build(options: { allowFrom?: number[] } = {}) {
+async function build(options: { allowFrom?: number[]; media?: unknown } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
   const access = await AccessPolicy.open(join(dir, 'owner.json'), {
     allowFrom: options.allowFrom ?? [OWNER],
@@ -44,6 +44,7 @@ async function build(options: { allowFrom?: number[] } = {}) {
     textCapture,
     runner,
     botUsername: 'my_bot',
+    ...(options.media ? { media: options.media as never } : {}),
     redact: (text) => text.split('SECRET-TOKEN').join('<redacted>'),
   })
 
@@ -67,7 +68,9 @@ describe('UpdateRouter — access', () => {
   it('sends an allowed user\'s message to the agent', async () => {
     const { router, runner } = await build()
     await router.handle(message('build the thing'))
-    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, 'build the thing')
+    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, [
+      { type: 'text', text: 'build the thing' },
+    ])
   })
 
   it('never lets an unauthorised message reach the agent', async () => {
@@ -159,7 +162,9 @@ describe('UpdateRouter — commands', () => {
   it('treats an unknown slash word as an ordinary prompt', async () => {
     const { router, runner } = await build()
     await router.handle(message('/deploy staging'))
-    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, '/deploy staging')
+    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, [
+      { type: 'text', text: '/deploy staging' },
+    ])
   })
 })
 
@@ -189,7 +194,9 @@ describe('UpdateRouter — pending prompts', () => {
     textCapture.next({ chatId: '1' })
 
     await router.handle(message('other chat', OWNER, 2))
-    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '2' }, 'other chat')
+    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '2' }, [
+      { type: 'text', text: 'other chat' },
+    ])
   })
 })
 
@@ -249,7 +256,7 @@ describe('UpdateRouter — robustness', () => {
     expect(runner.prompt).not.toHaveBeenCalled()
   })
 
-  it('says it cannot read a photo yet, rather than staying silent', async () => {
+  it('says so when a photo arrives but attachments are not configured', async () => {
     const { router, said } = await build()
     await router.handle({
       update_id: 5,
@@ -260,7 +267,51 @@ describe('UpdateRouter — robustness', () => {
         photo: [{ file_id: 'abc' }],
       },
     })
-    expect(said[0]).toContain('text messages')
+    expect(said[0]).toContain('attachments')
+  })
+
+  it('sends a photo through the collector when one is configured', async () => {
+    const { router, runner } = await build({
+      media: {
+        collect: async () => [{ type: 'image', attachment: { attachmentId: 'a1' } }],
+      },
+    })
+
+    await router.handle({
+      update_id: 6,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'abc' }],
+        caption: 'why this error?',
+      },
+    })
+
+    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, [
+      { type: 'image', attachment: { attachmentId: 'a1' } },
+    ])
+  })
+
+  it('does not read a captioned file as a command', async () => {
+    // '/new' as a caption on a screenshot is a caption, not a reset.
+    const { router, runner } = await build({
+      media: { collect: async () => [{ type: 'text', text: '/new' }] },
+    })
+
+    await router.handle({
+      update_id: 7,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'abc' }],
+        caption: '/new',
+      },
+    })
+
+    expect(runner.reset).not.toHaveBeenCalled()
+    expect(runner.prompt).toHaveBeenCalled()
   })
 
   it('reports a prompt failure into the chat instead of dying', async () => {
@@ -288,7 +339,9 @@ describe('UpdateRouter — robustness', () => {
         text: 'revised prompt',
       },
     })
-    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, 'revised prompt')
+    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, [
+      { type: 'text', text: 'revised prompt' },
+    ])
   })
 })
 

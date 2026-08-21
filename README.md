@@ -77,6 +77,22 @@ The claim code changes on every restart and is never sent over Telegram.
 
 Anything else you type is a prompt for the agent.
 
+## What you can send
+
+| You send | What the agent gets |
+| --- | --- |
+| Text | The prompt |
+| A photo, or an image sent as a file | The image itself, and your caption |
+| A text file — a log, a stack trace, source | Its contents in the prompt, truncated if very long |
+| A voice note, audio, or video | A note saying it could not be read |
+
+Images go through the harness attachment seam, which accepts PNG, JPEG, WebP
+and GIF. Everything else it explicitly defers, so this plugin says so rather
+than accepting the message and quietly dropping what it carried.
+
+A file that is too large, or that fails to download, becomes a note in the
+prompt explaining why — your caption still reaches the agent either way.
+
 ## Configuring it
 
 Open **Settings → Telegram** in the harness web UI. The page writes straight to
@@ -108,6 +124,9 @@ Every field has a working default; an empty config runs.
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
 | `streaming.placeholder` | `…` | Shown before any text arrives |
 | `longPollSeconds` | `25` | How long Telegram holds an empty poll open |
+| `media.enabled` | `true` | Read images and text files the user sends |
+| `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
+| `media.maxTextChars` | `60000` | Truncate an inlined text file to this many characters |
 
 ## Living alongside the web UI
 
@@ -156,7 +175,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 327 tests
+pnpm test          # 370 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

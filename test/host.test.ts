@@ -52,7 +52,7 @@ function fakeRegistry() {
   return { registry, bare, disposed, routes, failResume: () => void (resumeFails = true), make }
 }
 
-const message = (text: string) => ({ text })
+const message = (content: readonly unknown[]) => ({ content })
 
 function build(registry: AgentRegistryLike, selectModel?: () => { provider: string; model: string } | undefined) {
   return createAgentHost({
@@ -76,9 +76,11 @@ describe('createAgentHost — creating', () => {
   it('sends a prompt through the message factory', async () => {
     const fake = fakeRegistry()
     const agent = await build(fake.registry).create('s1', '/work')
-    agent.followup('do the thing')
+    agent.followup([{ type: 'text', text: 'do the thing' }])
 
-    expect(fake.bare.get('s1')?.prompts).toEqual([{ text: 'do the thing' }])
+    expect(fake.bare.get('s1')?.prompts).toEqual([
+      { content: [{ type: 'text', text: 'do the thing' }] },
+    ])
   })
 
   it('passes a cancellation cause through', async () => {
@@ -164,25 +166,35 @@ describe('createAgentHost — resuming', () => {
 })
 
 describe('message factory', () => {
+  const TEXT = [{ type: 'text' as const, text: 'hello' }]
+
   it('builds the documented user-message shape', () => {
-    const built = fallbackMessage('hello')
+    const built = fallbackMessage(TEXT)
     expect(built.role).toBe('user')
-    expect(built.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(built.content).toEqual(TEXT)
     expect(built.source).toEqual({ kind: 'user' })
   })
 
+  it('carries an image block beside the text, which is how a screenshot arrives', () => {
+    const built = fallbackMessage([
+      { type: 'text', text: 'why this error?' },
+      { type: 'image', attachment: { attachmentId: 'a1' } },
+    ])
+    expect(built.content.map((block) => block.type)).toEqual(['text', 'image'])
+  })
+
   it('gives every message its own identity', () => {
-    expect(fallbackMessage('a').id).not.toBe(fallbackMessage('b').id)
+    expect(fallbackMessage(TEXT).id).not.toBe(fallbackMessage(TEXT).id)
   })
 
   it('freezes the message, since the harness publishes it as immutable', () => {
-    expect(Object.isFrozen(fallbackMessage('hello'))).toBe(true)
+    expect(Object.isFrozen(fallbackMessage(TEXT))).toBe(true)
   })
 
   it('falls back cleanly when the harness module is absent', async () => {
     // Nothing provides @deepseek-ai/dsh-llm here, which is the case this guards.
     const factory = await resolveMessageFactory()
-    expect(factory('hi').content).toEqual([{ type: 'text', text: 'hi' }])
+    expect(factory(TEXT).content).toEqual(TEXT)
   })
 })
 

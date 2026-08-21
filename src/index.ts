@@ -38,6 +38,7 @@ import { SessionRunner } from './session/runner.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
+import { MediaCollector } from './media/collect.js'
 import { resolveMessageFactory } from './harness/message.js'
 import { installQuestionProvider } from './harness/questions-seam.js'
 import type { AgentRegistryLike, ModelRoute } from './harness/host.js'
@@ -265,6 +266,18 @@ async function start(
     logger,
   })
 
+  const media = config.media.enabled
+    ? new MediaCollector({
+        source: api,
+        // Absent on a deployment with no attachment seam; images are then
+        // declined with a reason rather than silently dropped.
+        ...(attachmentStore(ctx) ? { attachments: attachmentStore(ctx) as never } : {}),
+        maxBytes: config.media.maxBytes,
+        maxTextChars: config.media.maxTextChars,
+        logger,
+      })
+    : undefined
+
   const router = new UpdateRouter({
     chat: api,
     access,
@@ -273,6 +286,7 @@ async function start(
     textCapture,
     runner,
     ...(me.username ? { botUsername: me.username } : {}),
+    ...(media ? { media } : {}),
     redact: secrets.redactor(),
     logger,
   })
@@ -469,6 +483,16 @@ function selectModel(ctx: PluginContext, logger: Logger): ModelRoute | undefined
   }
 
   return undefined
+}
+
+/**
+ * The harness attachment seam, when this deployment mounts one.
+ *
+ * Read late rather than injected: a profile without it should still run the
+ * bot, declining images with a reason instead of failing to load.
+ */
+function attachmentStore(ctx: PluginContext): unknown {
+  return ctx.get('attachments')
 }
 
 /** Resolve the bot token through the harness credential seam. */

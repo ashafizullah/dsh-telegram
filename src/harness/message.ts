@@ -17,16 +17,27 @@
 
 import { randomUUID } from 'node:crypto'
 
+/** One block of model-visible content. */
+export type ContentBlock =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly attachment: unknown }
+
 /** The message shape `agent.followup()` accepts. */
 export interface UserMessageLike {
   readonly id: string
   readonly role: 'user'
-  readonly content: readonly { readonly type: 'text'; readonly text: string }[]
+  readonly content: readonly ContentBlock[]
   readonly source: { readonly kind: 'user' }
 }
 
-/** Builds one user message from plain text. */
-export type MessageFactory = (text: string) => UserMessageLike
+/**
+ * Builds one user message from content blocks.
+ *
+ * Blocks rather than a string because a prompt may carry an image: the model
+ * sees `{ type: 'image', attachment }` beside the text, which is how a
+ * screenshot becomes something it can actually look at.
+ */
+export type MessageFactory = (content: readonly ContentBlock[]) => UserMessageLike
 
 /** Shape of the harness module we borrow the factory from. */
 interface LlmModule {
@@ -46,9 +57,9 @@ export async function resolveMessageFactory(): Promise<MessageFactory> {
     const llm = (await import(specifier)) as LlmModule
     const create = llm.createUserMessage
     if (typeof create === 'function') {
-      return (text) =>
+      return (content) =>
         create({
-          content: [{ type: 'text', text }],
+          content: [...content],
           source: { kind: 'user' },
         }) as UserMessageLike
     }
@@ -60,11 +71,11 @@ export async function resolveMessageFactory(): Promise<MessageFactory> {
 }
 
 /** The documented user-message shape, built without the harness factory. */
-export function fallbackMessage(text: string): UserMessageLike {
+export function fallbackMessage(content: readonly ContentBlock[]): UserMessageLike {
   return Object.freeze({
     id: randomUUID(),
     role: 'user',
-    content: Object.freeze([Object.freeze({ type: 'text' as const, text })]),
+    content: Object.freeze(content.map((block) => Object.freeze({ ...block }))),
     source: Object.freeze({ kind: 'user' as const }),
   })
 }

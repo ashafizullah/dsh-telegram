@@ -78,8 +78,8 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
   const wrap = (agent: HarnessAgentLike, sessionId: string): RunningAgent => ({
     sessionId,
 
-    followup(text: string) {
-      agent.followup(options.message(text))
+    followup(content) {
+      agent.followup(options.message(content))
     },
 
     cancel(reason: string) {

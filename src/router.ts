@@ -24,12 +24,13 @@ import type { ChatTarget } from './interact/surface.js'
 import type { TextCapture } from './interact/text-capture.js'
 import type { Logger } from './harness/types.js'
 import { SILENT_LOGGER } from './harness/types.js'
+import type { MediaCollector, PromptPart } from './media/collect.js'
 import type { TelegramMessage, TelegramUpdate } from './telegram/types.js'
 
 /** What the router needs to drive a conversation's agent. */
 export interface AgentRunner {
   /** Deliver a prompt, starting or resuming the chat's session as needed. */
-  prompt(target: ChatTarget, text: string): Promise<void>
+  prompt(target: ChatTarget, content: readonly PromptPart[]): Promise<void>
   /** Forget the current session so the next prompt opens a fresh one. */
   reset(target: ChatTarget): Promise<void>
   /** Cancel the in-flight turn; resolves to whether anything was running. */
@@ -57,6 +58,11 @@ export interface UpdateRouterOptions {
   readonly approvals: CallbackHandler
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
+  /**
+   * Turns a message's attachments into prompt content. Absent leaves the bot
+   * text-only, which is what it was before media was wired up.
+   */
+  readonly media?: MediaCollector
   /** This bot's username, so `/cmd@other_bot` is left alone in groups. */
   readonly botUsername?: string
   /**
@@ -118,16 +124,29 @@ export class UpdateRouter {
 
     if (decision !== 'allowed') return await this.onUnauthorized(target, userId, text, decision)
 
-    if (text === undefined) {
-      return await this.say(target, 'I can only read text messages for now.')
+    const carriesMedia = hasMedia(message)
+
+    // A waiting question wants typed words, and a command is never a file, so
+    // both checks look at plain text only.
+    if (text !== undefined && !carriesMedia) {
+      if (this.options.textCapture.deliver(target, text)) return
+
+      const command = parseCommand(text, this.options.botUsername)
+      if (command) return await this.onCommand(target, userId, command.name, command.args)
     }
 
-    if (this.options.textCapture.deliver(target, text)) return
+    if (!carriesMedia) {
+      if (text === undefined) {
+        return await this.say(target, 'I can read text, images, and text files.')
+      }
+      return await this.runPrompt(target, [{ type: 'text', text }])
+    }
 
-    const command = parseCommand(text, this.options.botUsername)
-    if (command) return await this.onCommand(target, userId, command.name, command.args)
+    if (!this.options.media) {
+      return await this.say(target, 'This bot is not set up to read attachments.')
+    }
 
-    await this.runPrompt(target, text)
+    await this.runPrompt(target, await this.options.media.collect(message, text))
   }
 
   /**
@@ -205,9 +224,9 @@ export class UpdateRouter {
   }
 
   /** Hand a prompt to the agent, reporting a failure into the chat. */
-  private async runPrompt(target: ChatTarget, text: string): Promise<void> {
+  private async runPrompt(target: ChatTarget, content: readonly PromptPart[]): Promise<void> {
     try {
-      await this.options.runner.prompt(target, text)
+      await this.options.runner.prompt(target, content)
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error)
       const reason = this.options.redact?.(raw) ?? raw
@@ -228,6 +247,13 @@ export class UpdateRouter {
       this.logger.warn('[dsh-telegram] could not deliver a notice', error)
     }
   }
+}
+
+/** Whether a message carries anything beyond its text. */
+function hasMedia(message: TelegramMessage): boolean {
+  return Boolean(
+    message.photo || message.document || message.voice || message.audio || message.video,
+  )
 }
 
 /** The conversation a message belongs to. */

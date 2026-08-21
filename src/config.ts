@@ -53,6 +53,18 @@ export const Config = Schema.object({
       .description('Shown while the agent is thinking, before any text arrives.'),
   }),
 
+  media: Schema.object({
+    enabled: Schema.boolean()
+      .default(true)
+      .description('Read images and text files the user sends.'),
+    maxBytes: Schema.natural()
+      .default(20 * 1024 * 1024)
+      .description('Refuse anything larger. Telegram caps bot downloads at 20 MB.'),
+    maxTextChars: Schema.natural()
+      .default(60_000)
+      .description('Truncate an inlined text file to this many characters.'),
+  }),
+
   reconnect: Schema.object({
     baseDelayMs: Schema.natural().default(1000).description('First reconnect delay.'),
     maxDelayMs: Schema.natural().default(30_000).description('Longest reconnect delay.'),

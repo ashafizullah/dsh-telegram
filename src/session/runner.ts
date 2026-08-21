@@ -19,6 +19,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type { ChatTarget } from '../interact/surface.js'
+import type { PromptPart } from '../media/collect.js'
 import type { AgentRunner } from '../router.js'
 import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
@@ -29,7 +30,7 @@ import type { BindingStore } from './bindings.js'
 export interface RunningAgent {
   readonly sessionId: string
   /** Queue a user message and wake the driver. */
-  followup(text: string): void
+  followup(content: readonly PromptPart[]): void
   /** Cancel the in-flight turn and any queued work. */
   cancel(reason: string): void
   /** Stop the agent and release its session. */
@@ -74,10 +75,11 @@ export class SessionRunner implements AgentRunner {
    * @param target - the conversation the prompt came from.
    * @param text - what the user typed.
    */
-  async prompt(target: ChatTarget, text: string): Promise<void> {
+  async prompt(target: ChatTarget, content: readonly PromptPart[]): Promise<void> {
+    if (content.length === 0) return
     await this.serialize(target, async () => {
       const agent = await this.agentFor(target)
-      agent.followup(text)
+      agent.followup(content)
     })
   }
 

@@ -10,6 +10,9 @@ import type { AgentHost, RunningAgent } from '../src/session/runner.js'
 
 const CHAT = { chatId: '1' }
 
+/** One text prompt part, the ordinary case. */
+const text = (value: string) => [{ type: 'text' as const, text: value }]
+
 /** An agent host backed by an in-memory map, with spies on every transition. */
 function fakeHost() {
   const agents = new Map<string, RunningAgent & { prompts: string[]; cancelled: string[] }>()
@@ -22,8 +25,8 @@ function fakeHost() {
       sessionId,
       prompts: [] as string[],
       cancelled: [] as string[],
-      followup(text: string) {
-        agent.prompts.push(text)
+      followup(content: readonly { type: string; text?: string }[]) {
+        agent.prompts.push(content.map((part) => part.text ?? `[${part.type}]`).join(''))
       },
       cancel(reason: string) {
         agent.cancelled.push(reason)
@@ -77,7 +80,7 @@ function build(host: AgentHost, ids = ['s1', 's2', 's3']) {
 describe('SessionRunner — first message', () => {
   it('creates a session and binds the chat to it', async () => {
     const fake = fakeHost()
-    await build(fake.host).prompt(CHAT, 'hello')
+    await build(fake.host).prompt(CHAT, text('hello'))
 
     expect(fake.created).toEqual(['s1'])
     expect(bindings.forChat(CHAT)?.sessionId).toBe('s1')
@@ -85,14 +88,14 @@ describe('SessionRunner — first message', () => {
 
   it('delivers the prompt to the new agent', async () => {
     const fake = fakeHost()
-    await build(fake.host).prompt(CHAT, 'hello')
+    await build(fake.host).prompt(CHAT, text('hello'))
     expect(fake.agents.get('s1')?.prompts).toEqual(['hello'])
   })
 
   it('starts the session in the configured working directory', async () => {
     const fake = fakeHost()
     const create = vi.spyOn(fake.host, 'create')
-    await build(fake.host).prompt(CHAT, 'hello')
+    await build(fake.host).prompt(CHAT, text('hello'))
     expect(create).toHaveBeenCalledWith('s1', '/work')
   })
 })
@@ -102,8 +105,8 @@ describe('SessionRunner — continuing a conversation', () => {
     const fake = fakeHost()
     const runner = build(fake.host)
 
-    await runner.prompt(CHAT, 'one')
-    await runner.prompt(CHAT, 'two')
+    await runner.prompt(CHAT, text('one'))
+    await runner.prompt(CHAT, text('two'))
 
     expect(fake.created).toEqual(['s1'])
     expect(fake.agents.get('s1')?.prompts).toEqual(['one', 'two'])
@@ -111,11 +114,11 @@ describe('SessionRunner — continuing a conversation', () => {
 
   it('resumes from the log after a restart', async () => {
     const first = fakeHost()
-    await build(first.host).prompt(CHAT, 'before restart')
+    await build(first.host).prompt(CHAT, text('before restart'))
 
     // A new process: the binding survives, the loaded agent does not.
     const second = fakeHost()
-    await build(second.host).prompt(CHAT, 'after restart')
+    await build(second.host).prompt(CHAT, text('after restart'))
 
     expect(second.resumed).toEqual(['s1'])
     expect(second.created).toEqual([])
@@ -123,11 +126,11 @@ describe('SessionRunner — continuing a conversation', () => {
 
   it('starts fresh when the persisted session can no longer be loaded', async () => {
     const first = fakeHost()
-    await build(first.host).prompt(CHAT, 'before')
+    await build(first.host).prompt(CHAT, text('before'))
 
     const second = fakeHost()
     second.setResumable(false)
-    await build(second.host, ['s9']).prompt(CHAT, 'after')
+    await build(second.host, ['s9']).prompt(CHAT, text('after'))
 
     expect(second.created).toEqual(['s9'])
     expect(bindings.forChat(CHAT)?.sessionId).toBe('s9')
@@ -135,11 +138,11 @@ describe('SessionRunner — continuing a conversation', () => {
 
   it('starts fresh when resuming throws outright', async () => {
     const first = fakeHost()
-    await build(first.host).prompt(CHAT, 'before')
+    await build(first.host).prompt(CHAT, text('before'))
 
     const second = fakeHost()
     vi.spyOn(second.host, 'resume').mockRejectedValueOnce(new Error('log is corrupt'))
-    await build(second.host, ['s9']).prompt(CHAT, 'after')
+    await build(second.host, ['s9']).prompt(CHAT, text('after'))
 
     expect(second.created).toEqual(['s9'])
   })
@@ -148,7 +151,7 @@ describe('SessionRunner — continuing a conversation', () => {
     const fake = fakeHost()
     const runner = build(fake.host)
 
-    await Promise.all([runner.prompt(CHAT, 'one'), runner.prompt(CHAT, 'two')])
+    await Promise.all([runner.prompt(CHAT, text('one')), runner.prompt(CHAT, text('two'))])
 
     expect(fake.created).toEqual(['s1'])
     expect(fake.agents.get('s1')?.prompts).toEqual(['one', 'two'])
@@ -158,8 +161,8 @@ describe('SessionRunner — continuing a conversation', () => {
     const fake = fakeHost()
     const runner = build(fake.host)
 
-    await runner.prompt({ chatId: '1' }, 'a')
-    await runner.prompt({ chatId: '2' }, 'b')
+    await runner.prompt({ chatId: '1' }, text('a'))
+    await runner.prompt({ chatId: '2' }, text('b'))
 
     expect(fake.created).toEqual(['s1', 's2'])
   })
@@ -170,9 +173,9 @@ describe('SessionRunner — reset', () => {
     const fake = fakeHost()
     const runner = build(fake.host)
 
-    await runner.prompt(CHAT, 'one')
+    await runner.prompt(CHAT, text('one'))
     await runner.reset(CHAT)
-    await runner.prompt(CHAT, 'two')
+    await runner.prompt(CHAT, text('two'))
 
     expect(fake.created).toEqual(['s1', 's2'])
   })
@@ -181,7 +184,7 @@ describe('SessionRunner — reset', () => {
     const fake = fakeHost()
     const runner = build(fake.host)
 
-    await runner.prompt(CHAT, 'one')
+    await runner.prompt(CHAT, text('one'))
     await runner.reset(CHAT)
 
     expect(fake.agents.has('s1')).toBe(false)
@@ -195,7 +198,7 @@ describe('SessionRunner — reset', () => {
   it('still forgets the binding when disposal fails', async () => {
     const fake = fakeHost()
     const runner = build(fake.host)
-    await runner.prompt(CHAT, 'one')
+    await runner.prompt(CHAT, text('one'))
 
     const agent = fake.agents.get('s1')
     if (agent) agent.dispose = async () => Promise.reject(new Error('stuck'))
@@ -209,7 +212,7 @@ describe('SessionRunner — stop and status', () => {
   it('cancels the loaded agent', async () => {
     const fake = fakeHost()
     const runner = build(fake.host)
-    await runner.prompt(CHAT, 'one')
+    await runner.prompt(CHAT, text('one'))
 
     await expect(runner.stop(CHAT)).resolves.toBe(true)
     expect(fake.agents.get('s1')?.cancelled).toHaveLength(1)
@@ -222,7 +225,7 @@ describe('SessionRunner — stop and status', () => {
 
   it('reports nothing to stop when the session is only on disk', async () => {
     const first = fakeHost()
-    await build(first.host).prompt(CHAT, 'one')
+    await build(first.host).prompt(CHAT, text('one'))
 
     const second = fakeHost()
     await expect(build(second.host).stop(CHAT)).resolves.toBe(false)
@@ -236,7 +239,7 @@ describe('SessionRunner — stop and status', () => {
   it('reports the session id and working directory', async () => {
     const fake = fakeHost()
     const runner = build(fake.host)
-    await runner.prompt(CHAT, 'one')
+    await runner.prompt(CHAT, text('one'))
 
     const status = await runner.status(CHAT)
     expect(status).toContain('s1')
@@ -246,9 +249,19 @@ describe('SessionRunner — stop and status', () => {
 
   it('reports an unloaded session as idle', async () => {
     const first = fakeHost()
-    await build(first.host).prompt(CHAT, 'one')
+    await build(first.host).prompt(CHAT, text('one'))
 
     const second = fakeHost()
     expect(await build(second.host).status(CHAT)).toContain('idle')
+  })
+})
+
+
+describe('SessionRunner — empty prompts', () => {
+  it('does not wake an agent for a prompt with no content', async () => {
+    // A message whose every attachment failed to read produces no parts.
+    const fake = fakeHost()
+    await build(fake.host).prompt(CHAT, [])
+    expect(fake.created).toEqual([])
   })
 })
