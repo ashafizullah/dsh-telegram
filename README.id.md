@@ -282,7 +282,7 @@ tahu agent masih hidup, bukan membaca transkrip.
 
 ```bash
 pnpm install
-pnpm test          # 474 test
+pnpm test          # 477 test
 pnpm test -- --coverage
 pnpm typecheck     # paruh host dan browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser

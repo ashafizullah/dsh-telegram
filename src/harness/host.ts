@@ -136,7 +136,18 @@ export function createAgentHost(options: HarnessAgentHostOptions): AgentHost {
     return {
       selection,
       ...(install
-        ? { setup: (agentCtx: unknown) => install(agentCtx as AgentContextLike, selection) }
+        ? {
+            setup: (agentCtx: unknown) => {
+              // The braces matter. The harness calls `.commit()` on whatever
+              // setup returns, so handing back the installer's disposer — as
+              // an expression-bodied arrow would — crashes agent creation on
+              // a function that has no such method.
+              //
+              // Dropping the disposer is right anyway: the listeners live on
+              // the agent's own scope and unwind when the agent does.
+              install(agentCtx as AgentContextLike, selection)
+            },
+          }
         : {}),
     }
   }

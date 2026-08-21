@@ -282,3 +282,72 @@ describe('sameRoute', () => {
     expect(sameRoute({ provider: 'a', model: 'b' }, undefined)).toBe(false)
   })
 })
+
+describe('createAgentHost — the setup handed to the harness', () => {
+  /** A registry that treats setup exactly as the harness does. */
+  function harnessLike() {
+    const setups: unknown[] = []
+    const registry: AgentRegistryLike = {
+      get: () => undefined,
+      async create({ sessionId, setup }) {
+        // The harness calls `.commit()` on whatever setup returns.
+        const returned = (setup as ((ctx: unknown) => unknown) | undefined)?.({
+          on: () => () => undefined,
+        })
+        setups.push(returned)
+        ;(returned as { commit?: () => void } | undefined)?.commit?.()
+        return { agent: { id: sessionId, followup: () => undefined, cancel: () => undefined }, dispose: async () => undefined }
+      },
+      async resume({ resumeSessionId, setup }) {
+        const returned = (setup as ((ctx: unknown) => unknown) | undefined)?.({
+          on: () => () => undefined,
+        })
+        setups.push(returned)
+        ;(returned as { commit?: () => void } | undefined)?.commit?.()
+        return { agent: { id: resumeSessionId, followup: () => undefined, cancel: () => undefined }, dispose: async () => undefined }
+      },
+    }
+    return { registry, setups }
+  }
+
+  const install = (ctx: { on: (e: string, l: unknown) => () => void }) => {
+    ctx.on('system-prompt/assemble', () => undefined)
+    // Returns a disposer, as the real installer does.
+    return () => undefined
+  }
+
+  it('returns nothing, since the harness calls commit() on what it gets', async () => {
+    // Returning the installer's disposer crashed agent creation with
+    // "commit is not a function".
+    const fake = harnessLike()
+    await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      installSelection: install as never,
+    }).create('s1', '/work')
+
+    expect(fake.setups).toEqual([undefined])
+  })
+
+  it('returns nothing on resume either', async () => {
+    const fake = harnessLike()
+    await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      installSelection: install as never,
+    }).resume('s1')
+
+    expect(fake.setups).toEqual([undefined])
+  })
+
+  it('creates an agent without crashing on the returned value', async () => {
+    const fake = harnessLike()
+    const agent = await createAgentHost({
+      agents: fake.registry,
+      message: message as never,
+      installSelection: install as never,
+    }).create('s1', '/work')
+
+    expect(agent.sessionId).toBe('s1')
+  })
+})
