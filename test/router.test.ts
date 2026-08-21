@@ -273,7 +273,7 @@ describe('UpdateRouter — robustness', () => {
   it('sends a photo through the collector when one is configured', async () => {
     const { router, runner } = await build({
       media: {
-        collect: async () => [{ type: 'image', attachment: { attachmentId: 'a1' } }],
+        collect: async () => ({ parts: [{ type: 'image', attachment: { attachmentId: 'a1' } }] }),
       },
     })
 
@@ -296,7 +296,7 @@ describe('UpdateRouter — robustness', () => {
   it('does not read a captioned file as a command', async () => {
     // '/new' as a caption on a screenshot is a caption, not a reset.
     const { router, runner } = await build({
-      media: { collect: async () => [{ type: 'text', text: '/new' }] },
+      media: { collect: async () => ({ parts: [{ type: 'text', text: '/new' }] }) },
     })
 
     await router.handle({
@@ -367,5 +367,52 @@ describe('UpdateRouter — what it says out loud', () => {
 
     await router.handle(message('hello'))
     expect(said[0]).toContain('disk full')
+  })
+})
+
+
+describe('UpdateRouter — telling the user what could not be used', () => {
+  it('says so in the chat, without waiting for the agent to mention it', async () => {
+    const { router, said, runner } = await build({
+      media: {
+        collect: async () => ({
+          parts: [{ type: 'text', text: 'look at this' }],
+          notice: "deepseek-v4-flash can't read images.",
+        }),
+      },
+    })
+
+    await router.handle({
+      update_id: 8,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'abc' }],
+        caption: 'look at this',
+      },
+    })
+
+    expect(said[0]).toContain("can't read images")
+    // The caption still reaches the agent: the turn is not wasted.
+    expect(runner.prompt).toHaveBeenCalled()
+  })
+
+  it('says nothing extra when everything was usable', async () => {
+    const { router, said } = await build({
+      media: { collect: async () => ({ parts: [{ type: 'text', text: 'fine' }] }) },
+    })
+
+    await router.handle({
+      update_id: 9,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'abc' }],
+      },
+    })
+
+    expect(said).toHaveLength(0)
   })
 })

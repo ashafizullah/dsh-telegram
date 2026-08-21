@@ -13,6 +13,7 @@ import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
 
 import { describeMedia, isStorableImage } from './intake.js'
+import type { VisionCheck } from './vision.js'
 
 /** A durable image reference, as the harness attachment seam returns it. */
 export interface ImageRef {
@@ -40,11 +41,28 @@ export interface AttachmentStore {
   saveImage(input: { data: Uint8Array; mediaType: string; name?: string }): Promise<ImageRef>
 }
 
+/** What a message's attachments became, plus anything the user should be told. */
+export interface CollectedMedia {
+  /** Content for the agent, in the order the model should read it. */
+  readonly parts: PromptPart[]
+  /**
+   * A line for the chat, when something the user sent could not be used. The
+   * agent's prompt says so too, but the person who sent it should not have to
+   * wait for a reply to learn their screenshot went nowhere.
+   */
+  readonly notice?: string
+}
+
 /** Construction options. */
 export interface MediaCollectorOptions {
   readonly source: MediaSource
   /** Absent on a deployment with no attachment seam; images are then declined. */
   readonly attachments?: AttachmentStore
+  /**
+   * Whether the model can read an image at all. Absent skips the check and
+   * lets the provider be the authority, which is the older behaviour.
+   */
+  readonly vision?: VisionCheck
   /** Refuse anything larger, before downloading it. */
   readonly maxBytes: number
   /** Truncate an inlined text file to this many characters. */
@@ -66,32 +84,31 @@ export class MediaCollector {
    * @param caption - the text the user typed, if any.
    * @returns text and image parts, in the order the model should read them.
    */
-  async collect(message: TelegramMessage, caption: string | undefined): Promise<PromptPart[]> {
+  async collect(message: TelegramMessage, caption: string | undefined): Promise<CollectedMedia> {
     const item = describeMedia(message)
     const said = caption?.trim()
-    const parts: PromptPart[] = []
 
     if (!item) {
-      if (said) parts.push({ type: 'text', text: said })
-      return parts
+      return { parts: said ? [{ type: 'text', text: said }] : [] }
     }
 
     if (item.kind === 'unsupported') {
-      return [
-        {
-          type: 'text',
-          text: note(said, `The user sent ${item.describedAs ?? 'a file'}, which cannot be read.`),
-        },
-      ]
+      const what = item.describedAs ?? 'a file'
+      return this.declined(said, `${what}, which cannot be read`, `I can't read ${what}.`)
     }
 
     if (item.size !== undefined && item.size > this.options.maxBytes) {
-      return [
-        {
-          type: 'text',
-          text: note(said, `The user sent a file of ${item.size} bytes, above the size limit.`),
-        },
-      ]
+      const limit = Math.floor(this.options.maxBytes / 1024 / 1024)
+      return this.declined(
+        said,
+        `a file of ${item.size} bytes, above the size limit`,
+        `That file is too large — the limit is ${limit} MB.`,
+      )
+    }
+
+    if (item.kind === 'image') {
+      const refusal = await this.imageRefusal()
+      if (refusal) return this.declined(said, refusal.forAgent, refusal.forUser)
     }
 
     try {
@@ -100,20 +117,27 @@ export class MediaCollector {
       if (item.kind === 'text') {
         const text = decodeText(bytes, this.options.maxTextChars)
         const name = item.name ?? 'attachment'
-        parts.push({ type: 'text', text: `${said ? `${said}\n\n` : ''}File \`${name}\`:\n\n${text}` })
-        return parts
+        return {
+          parts: [
+            { type: 'text', text: `${said ? `${said}\n\n` : ''}File \`${name}\`:\n\n${text}` },
+          ],
+        }
       }
 
       if (!this.options.attachments) {
-        return [{ type: 'text', text: note(said, 'The user sent an image, but this deployment stores none.') }]
+        return this.declined(
+          said,
+          'an image, but this deployment stores none',
+          'This deployment cannot store images.',
+        )
       }
       if (!isStorableImage(item.mediaType)) {
-        return [
-          {
-            type: 'text',
-            text: note(said, `The user sent an image of type ${item.mediaType ?? 'unknown'}, which cannot be stored.`),
-          },
-        ]
+        const type = item.mediaType ?? 'unknown'
+        return this.declined(
+          said,
+          `an image of type ${type}, which cannot be stored`,
+          `Images of type ${type} cannot be stored. PNG, JPEG, WebP and GIF work.`,
+        )
       }
 
       const attachment = await this.options.attachments.saveImage({
@@ -123,13 +147,50 @@ export class MediaCollector {
       })
 
       // Text first: it is what the user asked, and the image is its subject.
+      const parts: PromptPart[] = []
       if (said) parts.push({ type: 'text', text: said })
       parts.push({ type: 'image', attachment })
-      return parts
+      return { parts }
     } catch (error) {
       this.logger.warn('[dsh-telegram] could not read an attachment', error)
       const reason = error instanceof Error ? error.message : String(error)
-      return [{ type: 'text', text: note(said, `The user sent a file that could not be read: ${reason}`) }]
+      return this.declined(
+        said,
+        `a file that could not be read: ${reason}`,
+        `That file could not be read: ${reason}`,
+      )
+    }
+  }
+
+  /**
+   * Why an image must not be sent on the current route, if it must not.
+   *
+   * A model with no image input rejects the entire request, so this refusal
+   * replaces a failed turn with a sentence naming what would have worked.
+   */
+  private async imageRefusal(): Promise<{ forAgent: string; forUser: string } | undefined> {
+    const vision = this.options.vision
+    if (!vision) return undefined
+    if ((await vision.verdict()) !== 'no') return undefined
+
+    const model = vision.currentModel() ?? 'the current model'
+    const alternatives = await vision.alternatives()
+    const suggestion =
+      alternatives.length > 0
+        ? ` These accept images: ${alternatives.join(', ')}.`
+        : ' No configured model accepts images.'
+
+    return {
+      forAgent: `an image, which the model ${model} cannot read, so it was left out`,
+      forUser: `${model} can't read images.${suggestion} Change it in Settings → Models.`,
+    }
+  }
+
+  /** Keep the caption, tell the agent what was left out, and tell the user why. */
+  private declined(said: string | undefined, forAgent: string, forUser: string): CollectedMedia {
+    return {
+      parts: [{ type: 'text', text: note(said, `The user sent ${forAgent}.`) }],
+      notice: forUser,
     }
   }
 

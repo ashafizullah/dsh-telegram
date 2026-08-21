@@ -39,6 +39,8 @@ import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
 import { MediaCollector } from './media/collect.js'
+import { VisionCheck } from './media/vision.js'
+import type { ModelCatalog } from './media/vision.js'
 import { resolveMessageFactory } from './harness/message.js'
 import { installQuestionProvider } from './harness/questions-seam.js'
 import type { AgentRegistryLike, ModelRoute } from './harness/host.js'
@@ -266,9 +268,17 @@ async function start(
     logger,
   })
 
+  // The llm service knows which models declare image input; without it the
+  // check is skipped and the provider stays the authority.
+  const catalog = ctx.get('llm') as ModelCatalog | undefined
+  const vision = catalog
+    ? new VisionCheck(catalog, () => selectModel(ctx, logger))
+    : undefined
+
   const media = config.media.enabled
     ? new MediaCollector({
         source: api,
+        ...(vision ? { vision } : {}),
         // Absent on a deployment with no attachment seam; images are then
         // declined with a reason rather than silently dropped.
         ...(attachmentStore(ctx) ? { attachments: attachmentStore(ctx) as never } : {}),

@@ -146,7 +146,11 @@ export class UpdateRouter {
       return await this.say(target, 'This bot is not set up to read attachments.')
     }
 
-    await this.runPrompt(target, await this.options.media.collect(message, text))
+    const collected = await this.options.media.collect(message, text)
+    // Said first: the user should not have to wait for a reply to learn that
+    // what they attached went nowhere.
+    if (collected.notice) await this.say(target, escapeHtml(collected.notice))
+    await this.runPrompt(target, collected.parts)
   }
 
   /**
