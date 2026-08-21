@@ -117,7 +117,7 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | 你发送 | Agent 收到 |
 | --- | --- |
 | 文本 | 提示词本身 |
-| 照片，或以文件形式发送的图片 | 图片本身，以及你的说明文字 |
+| 照片，或以文件形式发送的图片 | 视觉模型读出的内容，以及你的说明文字 |
 | 文本文件——日志、堆栈、源码 | 其内容进入提示词，过长时会被截断 |
 | 语音、音频或视频 | 一句说明：无法读取 |
 
@@ -154,7 +154,10 @@ Agent。
 图片放到别处去读，历史中就始终没有图片，对话因而留在原处、保有工具，也永远不会
 卡住。
 
-如果读取失败——没有配置模型、模型无法连接、或该回合在两分钟后超时——图片就按原样
+如果根本没有配置视觉模型，这条路径压根不会被走到：图片在下载之前就被谢绝，并附上
+一句说明哪些模型本可胜任，而你的说明文字仍会到达 Agent。
+
+如果读取已经尝试但失败了——模型无法连接，或该回合在两分钟后超时——图片就按原样
 发出，改为让对话迁移到视觉模型上，并持久生效，直到 `/new`。那是退路而非设计，
 提示词里会说明发生了哪一种情况。
 
@@ -183,6 +186,10 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 
 页面上的每一项，同样可以在 profile patch 中设置，供以文件方式配置的部署使用。
 
+## 配置项
+
+每个字段都有可用的默认值；配置为空也能运行。
+
 | 键 | 默认值 | 含义 |
 | --- | --- | --- |
 | `enabled` | `true` | 连接是否随 harness 一同启动 |
@@ -193,11 +200,14 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 | `streaming.enabled` | `true` | 边生成边显示回答 |
 | `streaming.throttleMs` | `1200` | 两帧之间的最小间隔 |
 | `streaming.placeholder` | `…` | 在有正文之前，工具行下方显示的内容 |
+| `timeoutMs` | `30000` | 单次 Bot API 请求的超时时间 |
 | `longPollSeconds` | `25` | Telegram 保持空轮询打开的时长 |
 | `media.enabled` | `true` | 读取用户发送的图片和文本文件 |
 | `media.maxBytes` | `20 MB` | 超过则拒绝；Telegram 的机器人下载上限即在此 |
 | `media.maxTextChars` | `60000` | 内联文本文件截断到此字符数 |
 | `media.visionModel` | `""` | 在独立会话中读取图片的 `provider/model`；留空则把图片直接发给对话本身 |
+| `reconnect.baseDelayMs` | `1000` | 第一次重连前的延迟 |
+| `reconnect.maxDelayMs` | `30000` | 重连之间的最长延迟 |
 
 ## 诊断
 
@@ -229,12 +239,16 @@ Telegram Bot API
       │  长轮询：message + callback_query
       ▼
 UpdatePoller ──► UpdateRouter ──┬──► SessionRunner ──► ctx.agents
-                                │
+                                │           │
+                                │           └──► VisionExtractor ──► 一次性会话
+                                ├──► MediaCollector ──► ctx.attachments
                                 ├──► TelegramQuestionProvider ──► ctx.userQuestions
-                                ├──► TelegramApprovalAnswerer ──► approval/request
-                                └──► MediaCollector ──► ctx.attachments
+                                └──► TelegramApprovalAnswerer ──► approval/request
 
-ctx.on('session/event') ──► TurnBridge ──► RichReplyStream ──► sendRichMessage
+ctx.on('session/event') ──┬──► VisionExtractor   （它自己的读取会话）
+                          └──► TurnBridge ──► RichReplyStream ──► sendRichMessage
+
+TypingIndicator          （路由器与桥接持有，直到回复出现）
 ```
 
 ### 回复是如何流式呈现的

@@ -126,7 +126,7 @@ Apa pun selain itu diperlakukan sebagai prompt untuk agent.
 | Kamu kirim | Yang diterima agent |
 | --- | --- |
 | Teks | Prompt-nya |
-| Foto, atau gambar yang dikirim sebagai file | Gambarnya sendiri, beserta caption-mu |
+| Foto, atau gambar yang dikirim sebagai file | Isi gambar yang dibaca model vision, beserta caption-mu |
 | Berkas teks — log, stack trace, source | Isinya dalam prompt, dipotong bila sangat panjang |
 | Voice note, audio, atau video | Catatan bahwa itu tidak bisa dibaca |
 
@@ -175,11 +175,15 @@ yang kamu pilih dan tool yang dikonfigurasi di sekitarnya. Membacanya di tempat
 lain membuat riwayat tetap bersih dari gambar, sehingga percakapan tetap di
 tempatnya, tetap punya tool-nya, dan tidak pernah tersangkut.
 
-Kalau pembacaannya gagal — tidak ada model yang dikonfigurasi, model tidak bisa
-dihubungi, atau turn-nya habis waktu setelah dua menit — gambarnya dikirim apa
-adanya dan percakapan yang pindah ke model vision, secara durable, sampai
-`/new`. Itu cadangan, bukan rancangannya, dan prompt-nya menyebutkan mana yang
-terjadi.
+Kalau tidak ada model vision yang dikonfigurasi, jalur ini tidak pernah
+tersentuh sama sekali: gambarnya ditolak bahkan sebelum diunduh, dengan kalimat
+yang menyebutkan model mana yang akan berhasil, dan caption-mu tetap sampai ke
+agent.
+
+Kalau pembacaan sudah dicoba lalu gagal — model tidak bisa dihubungi, atau
+turn-nya habis waktu setelah dua menit — gambarnya dikirim apa adanya dan
+percakapan yang pindah ke model vision, secara durable, sampai `/new`. Itu
+cadangan, bukan rancangannya, dan prompt-nya menyebutkan mana yang terjadi.
 
 Katalog yang bisa dibaca browser tidak membawa informasi modalitas, jadi
 dropdown itu tidak bisa menandai model mana yang menerima gambar. Host yang
@@ -216,6 +220,10 @@ berhasil padahal resolusi tetap mengembalikan nilai environment.
 Semua yang ada di halaman itu sama-sama bisa diatur lewat profile patch, untuk
 deployment yang dikonfigurasi lewat berkas.
 
+## Konfigurasi
+
+Setiap field punya bawaan yang bekerja; config kosong tetap jalan.
+
 | Kunci | Bawaan | Arti |
 | --- | --- | --- |
 | `enabled` | `true` | Apakah koneksi ikut hidup bersama harness |
@@ -226,11 +234,14 @@ deployment yang dikonfigurasi lewat berkas.
 | `streaming.enabled` | `true` | Tampilkan jawaban sambil ditulis |
 | `streaming.throttleMs` | `1200` | Jeda minimum antar frame stream |
 | `streaming.placeholder` | `…` | Isi yang ditampilkan di bawah baris tool sebelum teks pertama tiba |
+| `timeoutMs` | `30000` | Batas waktu tiap permintaan Bot API |
 | `longPollSeconds` | `25` | Berapa lama Telegram menahan poll kosong |
 | `media.enabled` | `true` | Baca gambar dan berkas teks yang dikirim |
 | `media.maxBytes` | `20 MB` | Tolak yang lebih besar; Telegram membatasi unduhan bot di situ |
 | `media.maxTextChars` | `60000` | Potong berkas teks pada jumlah karakter ini |
 | `media.visionModel` | `""` | `provider/model` yang membaca gambar di sesi tersendiri; kosong mengirim gambarnya ke percakapan itu sendiri |
+| `reconnect.baseDelayMs` | `1000` | Jeda sebelum percobaan sambung ulang pertama |
+| `reconnect.maxDelayMs` | `30000` | Jeda terpanjang antar percobaan sambung ulang |
 
 ## Diagnostik
 
@@ -264,12 +275,17 @@ Telegram Bot API
       │  long poll: message + callback_query
       ▼
 UpdatePoller ──► UpdateRouter ──┬──► SessionRunner ──► ctx.agents
-                                │
+                                │           │
+                                │           └──► VisionExtractor ──► sesi
+                                │                                    sekali-pakai
+                                ├──► MediaCollector ──► ctx.attachments
                                 ├──► TelegramQuestionProvider ──► ctx.userQuestions
-                                ├──► TelegramApprovalAnswerer ──► approval/request
-                                └──► MediaCollector ──► ctx.attachments
+                                └──► TelegramApprovalAnswerer ──► approval/request
 
-ctx.on('session/event') ──► TurnBridge ──► RichReplyStream ──► sendRichMessage
+ctx.on('session/event') ──┬──► VisionExtractor   (sesi pembacaannya sendiri)
+                          └──► TurnBridge ──► RichReplyStream ──► sendRichMessage
+
+TypingIndicator          (ditahan router dan bridge sampai balasan tampil)
 ```
 
 ### Bagaimana balasan di-stream

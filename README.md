@@ -121,7 +121,7 @@ Anything else you type is a prompt for the agent.
 | You send | What the agent gets |
 | --- | --- |
 | Text | The prompt |
-| A photo, or an image sent as a file | The image itself, and your caption |
+| A photo, or an image sent as a file | What the vision model reads in it, and your caption |
 | A text file — a log, a stack trace, source | Its contents in the prompt, truncated if very long |
 | A voice note, audio, or video | A note saying it could not be read |
 
@@ -166,10 +166,14 @@ text — has to run there too, away from the model you chose and the tools
 configured around it. Reading it elsewhere keeps the history free of images, so
 the conversation stays where it was, keeps its tools, and never gets stuck.
 
-If the reading fails — no model configured, the model unreachable, the turn
-timing out after two minutes — the picture goes through as it is and the
-conversation moves onto the vision model instead, durably, until `/new`. That
-is the fallback rather than the design, and the prompt says which happened.
+With no vision model configured nothing reaches this path at all: the image is
+declined before it is even downloaded, with a sentence naming the models that
+would have worked, and your caption still reaches the agent.
+
+If a reading is attempted and fails — the model unreachable, the turn timing out
+after two minutes — the picture goes through as it is and the conversation moves
+onto the vision model instead, durably, until `/new`. That is the fallback
+rather than the design, and the prompt says which happened.
 
 The catalog the browser can read carries no modality information, so the
 dropdown cannot mark which models accept images. The host checks that when an
@@ -219,11 +223,14 @@ Every field has a working default; an empty config runs.
 | `streaming.enabled` | `true` | Show the answer as it is written |
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
 | `streaming.placeholder` | `…` | Body shown under a tool-activity line before any text arrives |
+| `timeoutMs` | `30000` | Per-request Bot API timeout |
 | `longPollSeconds` | `25` | How long Telegram holds an empty poll open |
 | `media.enabled` | `true` | Read images and text files the user sends |
 | `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
 | `media.maxTextChars` | `60000` | Truncate an inlined text file to this many characters |
 | `media.visionModel` | `""` | `provider/model` that reads images in a session of its own; empty sends the image to the conversation itself. Picked from a dropdown on the settings page |
+| `reconnect.baseDelayMs` | `1000` | Delay before the first reconnect attempt |
+| `reconnect.maxDelayMs` | `30000` | Longest delay between reconnect attempts |
 
 ## Diagnostics
 
@@ -258,11 +265,17 @@ Telegram Bot API
       │  long poll: message + callback_query
       ▼
 UpdatePoller ──► UpdateRouter ──┬──► SessionRunner ──► ctx.agents
-                                │
+                                │           │
+                                │           └──► VisionExtractor ──► a throwaway
+                                │                                    session
+                                ├──► MediaCollector ──► ctx.attachments
                                 ├──► TelegramQuestionProvider ──► ctx.userQuestions
                                 └──► TelegramApprovalAnswerer ──► approval/request
 
-ctx.on('session/event') ──► TurnBridge ──► RichReplyStream ──► sendRichMessage
+ctx.on('session/event') ──┬──► VisionExtractor   (its own reading sessions)
+                          └──► TurnBridge ──► RichReplyStream ──► sendRichMessage
+
+TypingIndicator          (held by the router and the bridge until a reply shows)
 ```
 
 ### How a reply is streamed
