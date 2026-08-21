@@ -41,12 +41,12 @@ import { escapeHtml } from './render/escape.js'
 import { BindingStore } from './session/bindings.js'
 import { RecoveryOffer } from './session/recovery.js'
 import { SessionRunner } from './session/runner.js'
-import { PermissionControl } from './session/permission.js'
+import { PermissionControl, matchPreset } from './session/permission.js'
 import { ChatHistory } from './session/history.js'
 import { SessionPicker } from './session/picker.js'
 import { isUsableDirectory, resolveDirectory } from './session/workspaces.js'
 import { ChatPreferences } from './session/preferences.js'
-import { formatRoute, listCatalog, matchRoute } from './session/models.js'
+import { effortsFor, formatRoute, listCatalog, matchEffort, matchRoute } from './session/models.js'
 import type { CatalogProvider, ProviderCatalog } from './session/models.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
@@ -60,7 +60,8 @@ import type { ModelCatalog } from './media/vision.js'
 import { buildUserMessage } from './harness/message.js'
 import { installModelSelection, parseRoute } from './harness/model-selection.js'
 import { installQuestionProvider } from './harness/questions-seam.js'
-import type { AgentRegistryLike, ModelRoute } from './harness/host.js'
+import type { AgentRegistryLike } from './harness/host.js'
+import type { ModelRoute } from './harness/model-selection.js'
 import type {
   ApprovalOutcome,
   ApprovalRequest,
@@ -333,10 +334,16 @@ async function start(
 
   // The deployment's default is chosen for the surface the operator sits in
   // front of. Telegram is not that surface, so it may choose its own.
+  const chosenPermissions = await ChatPreferences.open(join(home, 'permissions.json'), {
+    accept: (value) => value.trim() !== '',
+  })
+
   const permission = new PermissionControl({
     ...(ctx.get('permissionPresets') ? { presets: ctx.get('permissionPresets') as never } : {}),
     ...(ctx.get('sessions') ? { sessions: ctx.get('sessions') as never } : {}),
-    preset: () => config.permissionPreset || undefined,
+    // A conversation's own choice outranks the plugin's setting, which in turn
+    // outranks the deployment's default.
+    preset: (target) => chosenPermissions.forChat(target) ?? config.permissionPreset ?? undefined,
     logger,
   })
 
@@ -346,7 +353,23 @@ async function start(
   const chosenModels = await ChatPreferences.open(join(home, 'models.json'), {
     accept: (value) => parseRoute(value) !== undefined,
   })
-  const chosenRoute = (target: ChatTarget) => parseRoute(chosenModels.forChat(target))
+  const chosenEfforts = await ChatPreferences.open(join(home, 'efforts.json'), {
+    accept: (value) => value.trim() !== '',
+  })
+
+  /**
+   * The route a conversation's next step should run on.
+   *
+   * An effort alone still needs a route to carry it, so it falls back to the
+   * deployment's own model rather than being silently dropped.
+   */
+  const chosenRoute = (target: ChatTarget): ModelRoute | undefined => {
+    const model = parseRoute(chosenModels.forChat(target))
+    const effort = chosenEfforts.forChat(target)
+    const base = model ?? (effort === undefined ? undefined : selectModel(ctx, logger))
+    if (!base) return undefined
+    return effort === undefined ? base : { ...base, reasoningEffort: effort }
+  }
 
   const history = await ChatHistory.open(join(home, 'history.json'))
 
@@ -407,8 +430,57 @@ async function start(
     recovery,
     sessions: sessionPicker,
     typing,
+    ...(permission.available
+      ? {
+          permission: {
+            describe: (target) =>
+              chosenPermissions.forChat(target) ?? (config.permissionPreset || 'the deployment default'),
+            options: () => permission.names,
+            async choose(target, input) {
+              const matched = matchPreset(input, permission.names)
+              if (matched === undefined) return undefined
+
+              await chosenPermissions.set(target, matched)
+              // Applied to the session in flight too: the reason to tighten it
+              // is usually the turn about to run, not the next conversation.
+              const live = bindings.forChat(target)?.sessionId
+              if (live !== undefined) permission.apply(target, live)
+              return matched
+            },
+            async clear(target) {
+              await chosenPermissions.clear(target)
+              const live = bindings.forChat(target)?.sessionId
+              if (live !== undefined) permission.apply(target, live)
+            },
+          },
+        }
+      : {}),
     ...(catalog
       ? {
+          effort: {
+            describe: (target) =>
+              chosenEfforts.forChat(target) ?? "the model's own default",
+            model: (target) => formatRoute(chosenRoute(target) ?? selectModel(ctx, logger)),
+            async options(target) {
+              const reasoning = await effortsFor(
+                catalog as unknown as ProviderCatalog,
+                chosenRoute(target) ?? selectModel(ctx, logger),
+              )
+              return (reasoning?.efforts ?? []).map((option) => option.id)
+            },
+            async choose(target, input) {
+              const reasoning = await effortsFor(
+                catalog as unknown as ProviderCatalog,
+                chosenRoute(target) ?? selectModel(ctx, logger),
+              )
+              const matched = matchEffort(input, reasoning?.efforts ?? [])
+              if (matched === undefined) return undefined
+
+              await chosenEfforts.set(target, matched)
+              return matched
+            },
+            clear: (target) => chosenEfforts.clear(target),
+          },
           models: buildModelControl({
             catalog: catalog as unknown as ProviderCatalog,
             store: chosenModels,

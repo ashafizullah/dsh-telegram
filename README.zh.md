@@ -108,6 +108,8 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | `/new` | 开始新对话，忘掉当前这一段 |
 | `/cd [路径]` | 查看或切换工作目录 |
 | `/model [名称]` | 查看模型、`/model list`，或切换到某一个 |
+| `/effort [强度]` | 查看或调整模型思考的深度 |
+| `/permission [名称]` | 查看或调整 Agent 在这里被允许做什么 |
 | `/sessions` | 继续这个聊天里较早的一段对话 |
 | `/status` | 会话 ID、工作目录，以及是否已加载 |
 | `/stop` | 取消 Agent 当前正在做的事 |
@@ -133,6 +135,21 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 
 它同时决定审批按钮能否工作：在审批策略为 `never` 的 preset 下，永远不会有人来
 请求许可，按钮也就永远不会出现。选一个会询问的 preset，才是把它们打开。
+
+### 思考强度，以及被允许做什么
+
+`/effort` 显示模型思考得多深，并列出**这个模型**提供的档位——档位是从模型自己读来
+的，因为 `low`/`medium`/`high` 只是某一家供应方的说法，而不是所有人的；提供一个
+模型没有的档位，失败的会是这个回合，而不只是这条命令。`/effort default` 可以还原。
+
+`/permission` 显示 Agent 在这里被允许做什么，并可切换：`read-only`、
+`workspace-write`、`danger-full-access`，或者你的部署定义的任何其他名字——名字读
+自它自己的表，而不是写死在这里。拼写很宽松，`full access`、`full-access` 和
+`readonly` 都能命中；而同时匹配两个 preset 的简写会被拒绝，而不是靠猜。改动对正在
+进行的对话同样生效，因为人们收紧权限的理由，通常正是马上要跑的那个回合。
+
+`/status` 用一条消息回答全部——会话、目录、模型、思考强度、权限——因为为了搞清楚
+自己在跟什么说话而要敲四条命令，是四条太多了。
 
 ### 用哪个模型，以及哪一段对话
 
@@ -383,8 +400,6 @@ React 与 shell 自身的包被标记为 external；打包第二份 React 会在
 
 ## 已知限制
 
-- **推理强度未被传递。** 只有 provider 和 model 会到达 Telegram 会话；在
-  设置 → Models 中选择的推理强度不会。
 - **每个对话一个目录。** `/cd` 可以移动对话，但会话本身无法移动——切换目录会
   开启一段新会话。
 - **暂不支持语音、音频或视频。** harness 的附件接缝只接受图片。

@@ -29,6 +29,12 @@ async function build(
     requireAddressing?: boolean
     /** Set false to run without a model catalog, as a bare deployment does. */
     models?: boolean
+    /** Set false to run without the effort seam. */
+    effort?: boolean
+    /** Efforts the current model offers; empty means it offers no choice. */
+    efforts?: string[]
+    /** Set false to run without the permission seam. */
+    permission?: boolean
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
@@ -87,6 +93,37 @@ async function build(
     clear: async () => void (model = undefined),
   }
 
+  /** The conversation's reasoning effort. */
+  let effort: string | undefined
+  const offered = options.efforts ?? ['low', 'medium', 'high']
+  const effortSeam = {
+    describe: () => effort ?? "the model's own default",
+    model: () => 'xiaomi/mimo-v2.5',
+    options: async () => offered,
+    choose: async (_target: { chatId: string }, input: string) => {
+      if (!offered.includes(input)) return undefined
+      effort = input
+      return input
+    },
+    clear: async () => void (effort = undefined),
+  }
+
+  /** What the agent may do here. */
+  let preset: string | undefined
+  const permissionSeam = {
+    describe: () => preset ?? 'the deployment default',
+    options: () => ['read-only', 'workspace-write', 'danger-full-access'],
+    choose: async (_target: { chatId: string }, input: string) => {
+      const matched = ['read-only', 'workspace-write', 'danger-full-access'].find((name) =>
+        name.replace(/-/g, '').includes(input.replace(/[\s_-]/g, '').toLowerCase()),
+      )
+      if (matched === undefined) return undefined
+      preset = matched
+      return matched
+    },
+    clear: async () => void (preset = undefined),
+  }
+
   const router = new UpdateRouter({
     chat: {
       sendMessage: async ({ html }) => void said.push(html),
@@ -98,6 +135,8 @@ async function build(
     ...(options.typing === false ? {} : { typing }),
     ...(options.workspace === false ? {} : { workspace }),
     ...(options.models === false ? {} : { models }),
+    ...(options.effort === false ? {} : { effort: effortSeam }),
+    ...(options.permission === false ? {} : { permission: permissionSeam }),
     textCapture,
     runner,
     botUsername: 'my_bot',
@@ -124,6 +163,10 @@ async function build(
     directory: () => directory,
     /** Which model it is talking to now. */
     model: () => model,
+    /** How hard it is thinking. */
+    effort: () => effort,
+    /** What it is allowed to do. */
+    preset: () => preset,
   }
 }
 
@@ -213,6 +256,21 @@ describe('UpdateRouter — commands', () => {
     const { router, said } = await build()
     await router.handle(message('/status'))
     expect(said[0]).toContain('ch-1')
+  })
+
+  it('answers "what am I talking to" in one message, not four commands', async () => {
+    // The permission line especially: it is the one worth being sure about
+    // before asking for something destructive.
+    const { router, said } = await build()
+    await router.handle(message('/model xiaomi/mimo-v2.5'))
+    await router.handle(message('/effort high'))
+    await router.handle(message('/permission read-only'))
+    await router.handle(message('/status'))
+
+    const status = said[said.length - 1] ?? ''
+    expect(status).toContain('xiaomi/mimo-v2.5')
+    expect(status).toContain('high')
+    expect(status).toContain('read-only')
   })
 
   it('lists the commands on /help', async () => {
@@ -484,6 +542,109 @@ describe('UpdateRouter — /model', () => {
     const { router, said } = await build({ models: false })
     await router.handle(message('/model list'))
     expect(said[0]).toContain('does not allow')
+  })
+})
+
+describe('UpdateRouter — /effort', () => {
+  it('shows the effort in force and what the model offers', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/effort'))
+
+    expect(said[0]).toContain("the model's own default")
+    expect(said[0]).toContain('high')
+  })
+
+  it('changes it', async () => {
+    const { router, said, effort } = await build()
+    await router.handle(message('/effort high'))
+
+    expect(effort()).toBe('high')
+    expect(said[0]).toContain('next message')
+  })
+
+  it('does not restart the conversation', async () => {
+    const { router, runner } = await build()
+    await router.handle(message('/effort high'))
+    expect(runner.reset).not.toHaveBeenCalled()
+  })
+
+  it('returns to the model default', async () => {
+    const { router, effort } = await build()
+    await router.handle(message('/effort high'))
+    await router.handle(message('/effort default'))
+    expect(effort()).toBeUndefined()
+  })
+
+  it('names what the model does offer when the words match none', async () => {
+    const { router, said, effort } = await build()
+    await router.handle(message('/effort maximum'))
+
+    expect(effort()).toBeUndefined()
+    expect(said[0]).toContain('low, medium, high')
+  })
+
+  it('says so for a model that offers no choice at all', async () => {
+    const { router, said } = await build({ efforts: [] })
+    await router.handle(message('/effort high'))
+    expect(said[0]).toContain('no reasoning effort')
+  })
+
+  it('says so where the deployment offers no catalog', async () => {
+    const { router, said } = await build({ effort: false })
+    await router.handle(message('/effort high'))
+    expect(said[0]).toContain('does not allow')
+  })
+})
+
+describe('UpdateRouter — /permission', () => {
+  it('shows what the agent may do, and the alternatives', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/permission'))
+
+    expect(said[0]).toContain('the deployment default')
+    expect(said[0]).toContain('read-only')
+    expect(said[0]).toContain('danger-full-access')
+  })
+
+  it('tightens it', async () => {
+    const { router, said, preset } = await build()
+    await router.handle(message('/permission read-only'))
+
+    expect(preset()).toBe('read-only')
+    expect(said[0]).toContain('read-only')
+  })
+
+  it('takes the words somebody actually types', async () => {
+    const { router, preset } = await build()
+    await router.handle(message('/permission workspace write'))
+    expect(preset()).toBe('workspace-write')
+  })
+
+  it('returns to the deployment default', async () => {
+    const { router, preset } = await build()
+    await router.handle(message('/permission read-only'))
+    await router.handle(message('/permission default'))
+    expect(preset()).toBeUndefined()
+  })
+
+  it('names the presets this deployment has when the words match none', async () => {
+    const { router, said, preset } = await build()
+    await router.handle(message('/permission yolo'))
+
+    expect(preset()).toBeUndefined()
+    expect(said[0]).toContain('workspace-write')
+  })
+
+  it('says so where the deployment has no preset table', async () => {
+    const { router, said } = await build({ permission: false })
+    await router.handle(message('/permission read-only'))
+    expect(said[0]).toContain('does not allow')
+  })
+
+  it('refuses an unauthorised change, like any other command', async () => {
+    const { router, preset } = await build()
+    await router.handle(message('/permission danger-full-access', STRANGER))
+    expect(preset()).toBeUndefined()
   })
 })
 

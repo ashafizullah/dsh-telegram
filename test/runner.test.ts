@@ -381,7 +381,7 @@ describe('SessionRunner — the permission preset', () => {
       bindings,
       cwdFor: () => '/work',
       newSessionId: () => queue.shift() ?? 'exhausted',
-      permission: { apply: (sessionId) => void applied.push(sessionId) },
+      permission: { apply: (_target, sessionId) => void applied.push(sessionId) },
     })
     return { runner, applied }
   }

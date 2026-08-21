@@ -28,6 +28,8 @@ export const COMMANDS: Readonly<Record<string, string>> = {
   new: 'Start a fresh conversation, forgetting the current one',
   cd: 'Show or change the working directory: /cd ~/projects/app',
   model: 'Show or change the model: /model list, or /model provider/model',
+  effort: 'Show or change the reasoning effort: /effort high',
+  permission: 'Show or change what the agent may do: /permission read-only',
   sessions: 'Pick up an earlier conversation from this chat',
   status: 'Show the session, working directory, and who owns the bot',
   stop: 'Cancel whatever the agent is doing right now',

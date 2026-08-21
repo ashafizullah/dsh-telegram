@@ -105,7 +105,7 @@ export interface SessionRunnerOptions {
    * property of the surface the conversation arrives over, and a session that
    * outlived a restart is still that conversation.
    */
-  readonly permission?: { apply(sessionId: string): void }
+  readonly permission?: { apply(target: ChatTarget, sessionId: string): void }
   /**
    * Remembers which conversations this chat has had, so `/sessions` can offer
    * one back. Absent makes `/new` the one-way door it used to be.
@@ -335,7 +335,7 @@ export class SessionRunner implements AgentRunner {
         return undefined
       })
       if (resumed) {
-        this.options.permission?.apply(resumed.sessionId)
+        this.options.permission?.apply(target, resumed.sessionId)
         return resumed
       }
 
@@ -351,7 +351,7 @@ export class SessionRunner implements AgentRunner {
 
     // After creation, because the harness pins an initial permission before
     // publishing the session; switching afterwards is the supported path.
-    this.options.permission?.apply(sessionId)
+    this.options.permission?.apply(target, sessionId)
 
     await this.options.bindings.bind(target, sessionId)
     await this.options.history

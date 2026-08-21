@@ -18,6 +18,7 @@
  * them on.
  */
 
+import type { ChatTarget } from '../interact/surface.js'
 import type { Logger } from '../harness/types.js'
 import { SILENT_LOGGER } from '../harness/types.js'
 
@@ -38,9 +39,43 @@ export interface SessionLookup {
 export interface PermissionControlOptions {
   readonly presets?: PermissionPresetsLike
   readonly sessions?: SessionLookup
-  /** The preset to use; empty or undefined leaves the deployment default. */
-  readonly preset: () => string | undefined
+  /**
+   * The preset this conversation should run under; empty or undefined leaves
+   * the deployment default. Read per session so a change lands on the next
+   * conversation rather than the next restart.
+   */
+  readonly preset: (target: ChatTarget) => string | undefined
   readonly logger?: Logger
+}
+
+/**
+ * Find the preset a user's words name.
+ *
+ * Matched loosely against the deployment's own table rather than against a
+ * fixed list: the names are the deployment's to choose, and `full access`,
+ * `full-access` and `danger-full-access` are all the same request from
+ * somebody typing on a phone.
+ *
+ * @param input - what the user typed.
+ * @param names - every preset the deployment defines.
+ * @returns the exact table key, or undefined when nothing matches.
+ */
+export function matchPreset(input: string, names: readonly string[]): string | undefined {
+  const wanted = normalize(input)
+  if (wanted === '') return undefined
+
+  const exact = names.find((name) => normalize(name) === wanted)
+  if (exact !== undefined) return exact
+
+  // A shorthand is accepted only while it names ONE preset. `read` picking
+  // `read-only` is helpful; a prefix shared by two would be a coin toss.
+  const partial = names.filter((name) => normalize(name).includes(wanted))
+  return partial.length === 1 ? partial[0] : undefined
+}
+
+/** Compare names the way somebody types them, not the way they are stored. */
+function normalize(text: string): string {
+  return text.trim().toLowerCase().replace(/[\s_-]+/g, '')
 }
 
 export class PermissionControl {
@@ -75,8 +110,8 @@ export class PermissionControl {
    *
    * @param sessionId - the session to switch.
    */
-  apply(sessionId: string): void {
-    const wanted = this.options.preset()?.trim()
+  apply(target: ChatTarget, sessionId: string): void {
+    const wanted = this.options.preset(target)?.trim()
     if (!wanted) return
 
     const { presets, sessions } = this.options

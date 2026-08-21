@@ -112,6 +112,8 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/new` | Start a fresh conversation, forgetting the current one |
 | `/cd [path]` | Show or change the working directory |
 | `/model [what]` | Show the model, `/model list`, or switch to one |
+| `/effort [level]` | Show or change how hard the model thinks |
+| `/permission [name]` | Show or change what the agent may do here |
 | `/sessions` | Pick up an earlier conversation from this chat |
 | `/status` | Session id, working directory, and whether it is loaded |
 | `/stop` | Cancel whatever the agent is doing right now |
@@ -141,6 +143,25 @@ the deployment's own presets for Telegram conversations alone.
 It also decides whether the approval buttons work: under a preset whose
 approval policy is `never` nothing ever asks, so they can never appear.
 Choosing one that asks is what turns them on.
+
+### Effort, and what the agent may do
+
+`/effort` shows how hard the model thinks and lists what *that model* offers —
+read from the model itself, because `low`/`medium`/`high` is one provider's
+vocabulary rather than everyone's, and offering an effort a model does not have
+would fail the turn instead of the command. `/effort default` gives it back.
+
+`/permission` shows what the agent may do here and switches it: `read-only`,
+`workspace-write`, `danger-full-access`, or whatever else the deployment
+defines — the names are read from its own table, not fixed here. Spelling is
+forgiving, so `full access`, `full-access` and `readonly` all land, and a
+shorthand matching two presets is refused rather than guessed at. The change
+applies to the conversation in flight as well as the next one, because the
+reason to tighten it is usually the turn about to run.
+
+`/status` answers all of it in one message — session, directory, model, effort,
+permission — since having to run four commands to learn what you are talking to
+is four commands too many.
 
 ### Which model, and which conversation
 
@@ -434,8 +455,6 @@ would break every hook the moment the page mounted.
 
 ## Known limitations
 
-- **Reasoning effort is not carried.** Only provider and model reach a Telegram
-  session; an effort chosen in Settings → Models does not.
 - **One directory per conversation.** `/cd` moves a conversation, but a
   session cannot be moved: the change starts a fresh one.
 - **No voice, audio or video.** The harness attachment seam takes images only.

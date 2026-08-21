@@ -119,6 +119,8 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/new` | Mulai percakapan baru, melupakan yang sekarang |
 | `/cd [path]` | Lihat atau ganti working directory |
 | `/model [apa]` | Lihat model, `/model list`, atau ganti ke salah satu |
+| `/effort [level]` | Lihat atau ganti seberapa dalam model berpikir |
+| `/permission [nama]` | Lihat atau ganti apa yang boleh dilakukan agent di sini |
 | `/sessions` | Lanjutkan percakapan lama dari chat ini |
 | `/status` | ID sesi, working directory, dan apakah sedang dimuat |
 | `/stop` | Batalkan apa pun yang sedang dikerjakan agent |
@@ -149,6 +151,26 @@ khusus untuk percakapan Telegram.
 Ini juga yang menentukan tombol izin berfungsi atau tidak: di bawah preset yang
 kebijakannya `never`, tidak pernah ada yang meminta izin, jadi tombolnya tidak
 mungkin muncul. Memilih preset yang bertanya itulah yang menghidupkannya.
+
+### Kedalaman berpikir, dan apa yang boleh dilakukan
+
+`/effort` menampilkan seberapa dalam model berpikir dan mendaftar apa saja yang
+**model itu** tawarkan — dibaca dari modelnya sendiri, karena `low`/`medium`/
+`high` cuma kosakata satu provider, bukan semua orang, dan menawarkan effort
+yang tidak dipunya model akan menggagalkan turn-nya, bukan cuma perintahnya.
+`/effort default` mengembalikannya.
+
+`/permission` menampilkan apa yang boleh dilakukan agent di sini sekaligus
+menggantinya: `read-only`, `workspace-write`, `danger-full-access`, atau apa pun
+yang deployment-mu definisikan — namanya dibaca dari tabel miliknya sendiri,
+tidak dipatok di sini. Penulisannya longgar, jadi `full access`, `full-access`,
+dan `readonly` semuanya nyangkut, sementara singkatan yang cocok ke dua preset
+ditolak, bukan ditebak. Perubahannya berlaku untuk percakapan yang sedang jalan
+juga, karena alasan orang memperketatnya biasanya justru turn yang mau dijalankan.
+
+`/status` menjawab semuanya dalam satu pesan — sesi, direktori, model, effort,
+izin — karena harus menjalankan empat perintah cuma untuk tahu kamu sedang
+bicara dengan apa itu empat perintah kebanyakan.
 
 ### Model mana, dan percakapan mana
 
@@ -458,8 +480,6 @@ kedua ikut terbundel, semua hook rusak begitu halamannya ter-mount.
 
 ## Yang belum bisa
 
-- **Reasoning effort belum ikut terbawa.** Cuma provider dan model yang sampai
-  ke sesi Telegram; effort yang kamu pilih di Settings → Models tidak.
 - **Satu direktori per percakapan.** `/cd` memindahkan percakapan, tapi sesi
   yang sedang jalan tidak bisa dipindah — pindah direktori memulai sesi baru.
 - **Belum bisa voice, audio, atau video.** Jalur lampiran harness cuma menerima

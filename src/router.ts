@@ -87,6 +87,32 @@ export interface ModelControl {
   clear(target: ChatTarget): Promise<void>
 }
 
+/** The conversation's reasoning effort, and how to change it. */
+export interface EffortControl {
+  /** The effort in force, in words. */
+  describe(target: ChatTarget): string
+  /** The model it belongs to, for naming it in a refusal. */
+  model(target: ChatTarget): string
+  /** What that model offers; empty when it offers no choice. */
+  options(target: ChatTarget): Promise<readonly string[]>
+  /** Adopt one, or undefined when the words name none. */
+  choose(target: ChatTarget, input: string): Promise<string | undefined>
+  /** Return the conversation to the model's own default. */
+  clear(target: ChatTarget): Promise<void>
+}
+
+/** What the agent may do here, and how to change it. */
+export interface PermissionControlSeam {
+  /** The preset in force, in words. */
+  describe(target: ChatTarget): string
+  /** Every preset the deployment defines. */
+  options(): readonly string[]
+  /** Adopt one, or undefined when the words name none. */
+  choose(target: ChatTarget, input: string): Promise<string | undefined>
+  /** Return the conversation to the deployment's own preset. */
+  clear(target: ChatTarget): Promise<void>
+}
+
 /** Shows that a conversation is being worked on, until released. */
 export interface TypingHold {
   hold(target: ChatTarget): () => void
@@ -116,6 +142,10 @@ export interface UpdateRouterOptions {
   readonly models?: ModelControl
   /** Offers this chat's earlier conversations. Absent makes `/new` one-way. */
   readonly sessions?: CallbackHandler & { offer(target: ChatTarget): Promise<void> }
+  /** Absent leaves every conversation on the model's own reasoning effort. */
+  readonly effort?: EffortControl
+  /** Absent leaves every conversation on the deployment's permission preset. */
+  readonly permission?: PermissionControlSeam
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
@@ -318,6 +348,12 @@ export class UpdateRouter {
       case 'model':
         return await this.onModel(target, args)
 
+      case 'effort':
+        return await this.onEffort(target, args)
+
+      case 'permission':
+        return await this.onPermission(target, args)
+
       case 'sessions':
         if (!this.options.sessions) {
           return await this.say(target, 'This deployment does not keep a conversation list.')
@@ -330,7 +366,7 @@ export class UpdateRouter {
       }
 
       case 'status':
-        return await this.say(target, await this.options.runner.status(target))
+        return await this.say(target, await this.describeConversation(target))
 
       default:
         // Unreachable: parseCommand only returns names present in COMMANDS.
@@ -354,6 +390,135 @@ export class UpdateRouter {
     } finally {
       release?.()
     }
+  }
+
+  /**
+   * Everything about this conversation worth knowing in one message.
+   *
+   * The settings live behind four commands, and having to run all four to
+   * answer "what am I actually talking to right now" is four commands too
+   * many — especially the permission line, which is the one worth being sure
+   * about before asking for something destructive.
+   *
+   * @param target - the conversation.
+   */
+  private async describeConversation(target: ChatTarget): Promise<string> {
+    const lines = [await this.options.runner.status(target)]
+
+    const models = this.options.models
+    if (models) lines.push(`<b>Model</b> <code>${escapeHtml(models.describe(target))}</code>`)
+
+    const effort = this.options.effort
+    if (effort) lines.push(`<b>Effort</b> <code>${escapeHtml(effort.describe(target))}</code>`)
+
+    const permission = this.options.permission
+    if (permission) {
+      lines.push(`<b>Permission</b> <code>${escapeHtml(permission.describe(target))}</code>`)
+    }
+
+    return lines.join('\n')
+  }
+
+  /**
+   * Show or change how hard the model thinks before answering.
+   *
+   * The options come from the model itself: `low`/`medium`/`high` is one
+   * provider's vocabulary rather than everyone's, and offering an effort a
+   * model does not have would fail the turn instead of the command.
+   *
+   * @param target - the conversation.
+   * @param args - what followed `/effort`.
+   */
+  private async onEffort(target: ChatTarget, args: string): Promise<void> {
+    const effort = this.options.effort
+    if (!effort) {
+      return await this.say(target, 'This deployment does not allow changing the effort.')
+    }
+
+    const wanted = args.trim()
+    const offered = await effort.options(target)
+
+    if (offered.length === 0) {
+      return await this.say(
+        target,
+        `<code>${escapeHtml(effort.model(target))}</code> offers no reasoning effort to choose.`,
+      )
+    }
+
+    if (wanted === '') {
+      const list = offered.map((option) => `• <code>${escapeHtml(option)}</code>`).join('\n')
+      return await this.say(
+        target,
+        `🎚 <code>${escapeHtml(effort.describe(target))}</code>\n\n${list}\n\n` +
+          'Change it with <code>/effort high</code>.',
+      )
+    }
+
+    if (wanted.toLowerCase() === 'default') {
+      await effort.clear(target)
+      return await this.say(target, `🎚 Back to <code>${escapeHtml(effort.describe(target))}</code>.`)
+    }
+
+    const chosen = await effort.choose(target, wanted)
+    if (chosen === undefined) {
+      return await this.say(
+        target,
+        `⚠️ <code>${escapeHtml(effort.model(target))}</code> has no effort called ` +
+          `<code>${escapeHtml(wanted)}</code>. It offers: ${offered.join(', ')}.`,
+      )
+    }
+
+    return await this.say(
+      target,
+      `🎚 Thinking <code>${escapeHtml(chosen)}</code> from your next message.`,
+    )
+  }
+
+  /**
+   * Show or change what the agent is allowed to do here.
+   *
+   * Applied to the conversation in flight as well as recorded, because the
+   * point of tightening it is usually the turn about to run.
+   *
+   * @param target - the conversation.
+   * @param args - what followed `/permission`.
+   */
+  private async onPermission(target: ChatTarget, args: string): Promise<void> {
+    const permission = this.options.permission
+    if (!permission) {
+      return await this.say(target, 'This deployment does not allow changing permissions.')
+    }
+
+    const wanted = args.trim()
+    const offered = permission.options()
+
+    if (wanted === '') {
+      const list = offered.map((option) => `• <code>${escapeHtml(option)}</code>`).join('\n')
+      return await this.say(
+        target,
+        `🔐 <code>${escapeHtml(permission.describe(target))}</code>\n\n${list}\n\n` +
+          'Change it with <code>/permission read-only</code>.',
+      )
+    }
+
+    if (wanted.toLowerCase() === 'default') {
+      await permission.clear(target)
+      return await this.say(
+        target,
+        `🔐 Back to <code>${escapeHtml(permission.describe(target))}</code>.`,
+      )
+    }
+
+    const chosen = await permission.choose(target, wanted)
+    if (chosen === undefined) {
+      return await this.say(
+        target,
+        `⚠️ No permission preset called <code>${escapeHtml(wanted)}</code>. ` +
+          `This deployment offers: ${offered.join(', ')}.`,
+      )
+    }
+
+    return await this.say(target, `🔐 Now <code>${escapeHtml(chosen)}</code>.`)
   }
 
   /**

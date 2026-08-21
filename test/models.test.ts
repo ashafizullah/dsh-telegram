@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatRoute, listCatalog, matchRoute } from '../src/session/models.js'
+import { effortsFor, formatRoute, listCatalog, matchEffort, matchRoute } from '../src/session/models.js'
 import type { CatalogProvider } from '../src/session/models.js'
 
 const CATALOG: CatalogProvider[] = [
@@ -13,7 +13,7 @@ const CATALOG: CatalogProvider[] = [
 ]
 
 /** A catalog service, optionally with one provider that cannot be read. */
-function catalog(options: { broken?: string; empty?: string } = {}) {
+function catalog(options: { broken?: string; empty?: string; noReasoning?: boolean } = {}) {
   return {
     listProviders: () => CATALOG.map(({ id, name }) => ({ id, ...(name ? { name } : {}) })),
     async listModels(provider: string) {
@@ -21,8 +21,20 @@ function catalog(options: { broken?: string; empty?: string } = {}) {
       if (provider === options.empty) return []
       return CATALOG.find((entry) => entry.id === provider)?.models ?? []
     },
+    async resolveModelInfo(provider: string, _model: string) {
+      if (provider === options.broken) throw new Error('no api key')
+      if (options.noReasoning) return {}
+      return {
+        reasoning: {
+          efforts: [{ id: 'low' }, { id: 'medium', name: 'Balanced' }, { id: 'high' }],
+          defaultEffort: 'medium',
+        },
+      }
+    },
   }
 }
+
+const ROUTE = { provider: 'xiaomi', model: 'mimo-v2.5' }
 
 describe('listCatalog', () => {
   it('lists every configured provider with its models', async () => {
@@ -95,6 +107,53 @@ describe('matchRoute — what a user types', () => {
   it('keeps a model id that contains slashes, as a router-style provider has', () => {
     const routed = matchRoute('xiaomi/openai/gpt-5', CATALOG)
     expect(routed).toEqual({ kind: 'route', route: { provider: 'xiaomi', model: 'openai/gpt-5' } })
+  })
+})
+
+describe('effortsFor', () => {
+  it('reads what the model itself offers', async () => {
+    // low/medium/high is one provider's vocabulary, not everyone's; offering
+    // an effort a model lacks would fail the turn rather than the command.
+    const reasoning = await effortsFor(catalog(), ROUTE)
+    expect(reasoning?.efforts.map((option) => option.id)).toEqual(['low', 'medium', 'high'])
+    expect(reasoning?.defaultEffort).toBe('medium')
+  })
+
+  it('says nothing for a model that offers no choice', async () => {
+    expect(await effortsFor(catalog({ noReasoning: true }), ROUTE)).toBeUndefined()
+  })
+
+  it('says nothing when the catalog cannot be read', async () => {
+    expect(await effortsFor(catalog({ broken: 'xiaomi' }), ROUTE)).toBeUndefined()
+  })
+
+  it('says nothing without a route to ask about', async () => {
+    expect(await effortsFor(catalog(), undefined)).toBeUndefined()
+  })
+})
+
+describe('matchEffort', () => {
+  const EFFORTS = [{ id: 'low' }, { id: 'medium', name: 'Balanced' }, { id: 'high' }]
+
+  it('takes an effort id', () => {
+    expect(matchEffort('high', EFFORTS)).toBe('high')
+  })
+
+  it('does not care about case', () => {
+    expect(matchEffort('HIGH', EFFORTS)).toBe('high')
+  })
+
+  it('takes the display name, which is what a person reads off the list', () => {
+    expect(matchEffort('Balanced', EFFORTS)).toBe('medium')
+  })
+
+  it('refuses one the model does not offer', () => {
+    expect(matchEffort('maximum', EFFORTS)).toBeUndefined()
+    expect(matchEffort('  ', EFFORTS)).toBeUndefined()
+  })
+
+  it('refuses everything when the model offers nothing', () => {
+    expect(matchEffort('high', [])).toBeUndefined()
   })
 })
 

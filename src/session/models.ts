@@ -16,6 +16,18 @@
 import type { ModelRoute } from '../harness/model-selection.js'
 import { parseRoute } from '../harness/model-selection.js'
 
+/** One reasoning effort a model offers. */
+export interface EffortOption {
+  readonly id: string
+  readonly name?: string
+}
+
+/** What a model says about its own reasoning. */
+export interface ReasoningInfo {
+  readonly efforts: readonly EffortOption[]
+  readonly defaultEffort?: string
+}
+
 /** One model a provider advertises. */
 export interface CatalogModel {
   readonly id: string
@@ -33,6 +45,57 @@ export interface CatalogProvider {
 export interface ProviderCatalog {
   listProviders(): readonly { id: string; name?: string }[]
   listModels(provider: string): Promise<readonly CatalogModel[]>
+  resolveModelInfo(provider: string, model: string): Promise<{ reasoning?: ReasoningInfo }>
+}
+
+/**
+ * The efforts a route offers, and which one it uses by default.
+ *
+ * Read from the model rather than fixed here: `low`/`medium`/`high` is one
+ * provider's vocabulary, not everyone's, and offering an effort a model does
+ * not have would fail the turn rather than the command.
+ *
+ * @param catalog - the harness llm service.
+ * @param route - the model to ask about.
+ * @returns its reasoning options, or undefined when it has none or cannot say.
+ */
+export async function effortsFor(
+  catalog: ProviderCatalog,
+  route: ModelRoute | undefined,
+): Promise<ReasoningInfo | undefined> {
+  if (!route) return undefined
+
+  try {
+    const info = await catalog.resolveModelInfo(route.provider, route.model)
+    return info.reasoning !== undefined && info.reasoning.efforts.length > 0
+      ? info.reasoning
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Find the effort a user's words name.
+ *
+ * @param input - what followed `/effort`.
+ * @param efforts - what the current model offers.
+ * @returns the exact effort id, or undefined when nothing matches.
+ */
+export function matchEffort(
+  input: string,
+  efforts: readonly EffortOption[],
+): string | undefined {
+  const wanted = input.trim().toLowerCase()
+  if (wanted === '') return undefined
+
+  const exact = efforts.find((effort) => effort.id.toLowerCase() === wanted)
+  if (exact) return exact.id
+
+  // A display name is what a person reads off the list, so it is what they
+  // type back. Accepted only while it names one effort.
+  const named = efforts.filter((effort) => (effort.name ?? '').toLowerCase() === wanted)
+  return named.length === 1 ? (named[0] as EffortOption).id : undefined
 }
 
 /**

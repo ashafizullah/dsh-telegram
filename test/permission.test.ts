@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { PermissionControl } from '../src/session/permission.js'
+import { PermissionControl, matchPreset } from '../src/session/permission.js'
 
 /** A deployment table plus a live-session store, as the harness supplies them. */
 function harness(options: { names?: string[]; live?: string[]; setThrows?: boolean } = {}) {
@@ -31,25 +31,55 @@ function build(
   return { control, applied: fake.applied }
 }
 
+const CHAT = { chatId: '1' }
+
+describe('matchPreset — the words somebody types on a phone', () => {
+  const NAMES = ['read-only', 'workspace-write', 'danger-full-access']
+
+  it('takes the exact name', () => {
+    expect(matchPreset('workspace-write', NAMES)).toBe('workspace-write')
+  })
+
+  it('does not care about dashes, spaces or case', () => {
+    // `full access`, `full-access` and `Full Access` are one request.
+    expect(matchPreset('Workspace Write', NAMES)).toBe('workspace-write')
+    expect(matchPreset('read_only', NAMES)).toBe('read-only')
+  })
+
+  it('takes a shorthand that names exactly one preset', () => {
+    expect(matchPreset('readonly', NAMES)).toBe('read-only')
+    expect(matchPreset('full', NAMES)).toBe('danger-full-access')
+  })
+
+  it('refuses a shorthand that could be either, rather than tossing a coin', () => {
+    expect(matchPreset('e', NAMES)).toBeUndefined()
+  })
+
+  it('refuses a name nothing matches', () => {
+    expect(matchPreset('yolo', NAMES)).toBeUndefined()
+    expect(matchPreset('  ', NAMES)).toBeUndefined()
+  })
+})
+
 describe('PermissionControl — choosing a preset', () => {
   it('puts the session on the configured preset', () => {
     // The deployment default is chosen for the surface the operator sits at;
     // Telegram is reachable from anywhere and may choose differently.
     const { control, applied } = build('workspace-write')
-    control.apply('s1')
+    control.apply(CHAT, 's1')
 
     expect(applied).toEqual([{ session: 's1', name: 'workspace-write' }])
   })
 
   it('leaves the deployment default alone when nothing is configured', () => {
     const { control, applied } = build(undefined)
-    control.apply('s1')
+    control.apply(CHAT, 's1')
     expect(applied).toEqual([])
   })
 
   it('treats an empty setting as "not configured"', () => {
     const { control, applied } = build('   ')
-    control.apply('s1')
+    control.apply(CHAT, 's1')
     expect(applied).toEqual([])
   })
 
@@ -62,8 +92,8 @@ describe('PermissionControl — choosing a preset', () => {
       preset: () => queue.shift(),
     })
 
-    control.apply('s1')
-    control.apply('s1')
+    control.apply(CHAT, 's1')
+    control.apply(CHAT, 's1')
 
     expect(fake.applied.map((entry) => entry.name)).toEqual(['read-only', 'workspace-write'])
   })
@@ -72,7 +102,7 @@ describe('PermissionControl — choosing a preset', () => {
 describe('PermissionControl — when it cannot', () => {
   it('keeps the default rather than failing on an unknown name', () => {
     const { control, applied } = build('typo-mode')
-    control.apply('s1')
+    control.apply(CHAT, 's1')
     expect(applied).toEqual([])
   })
 
@@ -86,9 +116,9 @@ describe('PermissionControl — when it cannot', () => {
       logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
     })
 
-    control.apply('s1')
-    control.apply('s1')
-    control.apply('s1')
+    control.apply(CHAT, 's1')
+    control.apply(CHAT, 's1')
+    control.apply(CHAT, 's1')
 
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toContain('workspace-write')
@@ -96,18 +126,18 @@ describe('PermissionControl — when it cannot', () => {
 
   it('does nothing for a session that is not live', () => {
     const { control, applied } = build('workspace-write', { live: [] })
-    control.apply('gone')
+    control.apply(CHAT, 'gone')
     expect(applied).toEqual([])
   })
 
   it('survives a table that refuses the switch', () => {
     const { control } = build('workspace-write', { setThrows: true })
-    expect(() => control.apply('s1')).not.toThrow()
+    expect(() => control.apply(CHAT, 's1')).not.toThrow()
   })
 
   it('does nothing at all where the deployment composes no preset table', () => {
     const { control, applied } = build('workspace-write', { bare: true })
-    control.apply('s1')
+    control.apply(CHAT, 's1')
     expect(applied).toEqual([])
   })
 })
