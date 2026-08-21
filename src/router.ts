@@ -81,6 +81,14 @@ export interface WorkspaceControl {
  * provider catalog behind it.
  */
 export interface ModelControl {
+  /**
+   * What lies underneath this conversation's choice, when it has made one.
+   *
+   * Two surfaces show related state — this command and the settings page —
+   * and neither used to admit the other existed. Saying which layer is
+   * answering is what stops the page looking like it is lying.
+   */
+  origin?(target: ChatTarget): string | undefined
   /** The route in force, rendered the way it is typed back in. */
   describe(target: ChatTarget): string
   /** Every configured provider and model, as Telegram HTML. */
@@ -100,6 +108,14 @@ export interface ModelControl {
 
 /** The conversation's reasoning effort, and how to change it. */
 export interface EffortControl {
+  /**
+   * What lies underneath this conversation's choice, when it has made one.
+   *
+   * Two surfaces show related state — this command and the settings page —
+   * and neither used to admit the other existed. Saying which layer is
+   * answering is what stops the page looking like it is lying.
+   */
+  origin?(target: ChatTarget): string | undefined
   /** The effort in force, in words. */
   describe(target: ChatTarget): string
   /** The model it belongs to, for naming it in a refusal. */
@@ -112,11 +128,33 @@ export interface EffortControl {
   clear(target: ChatTarget): Promise<void>
 }
 
+/**
+ * A parenthetical naming the layer beneath this conversation's choice.
+ *
+ * Empty when the conversation is simply following the deployment, because
+ * there is then only one answer and pointing at it would be noise.
+ */
+function originNote(
+  control: { origin?(target: ChatTarget): string | undefined },
+  target: ChatTarget,
+): string {
+  const note = control.origin?.(target)
+  return note === undefined ? '' : `\n<i>${escapeHtml(note)}</i>`
+}
+
 /** Words that mean "no reader at all", as anyone would type them. */
 const OFF_WORDS = new Set(['off', 'none', 'no', 'disable', 'disabled'])
 
 /** The model that reads images for this conversation, and how to change it. */
 export interface VisionControl {
+  /**
+   * What lies underneath this conversation's choice, when it has made one.
+   *
+   * Two surfaces show related state — this command and the settings page —
+   * and neither used to admit the other existed. Saying which layer is
+   * answering is what stops the page looking like it is lying.
+   */
+  origin?(target: ChatTarget): string | undefined
   /** The reader in force, in words. */
   describe(target: ChatTarget): string
   /** Adopt one, or say why the words named none. */
@@ -136,6 +174,14 @@ export interface VisionControl {
 
 /** What the agent may do here, and how to change it. */
 export interface PermissionControlSeam {
+  /**
+   * What lies underneath this conversation's choice, when it has made one.
+   *
+   * Two surfaces show related state — this command and the settings page —
+   * and neither used to admit the other existed. Saying which layer is
+   * answering is what stops the page looking like it is lying.
+   */
+  origin?(target: ChatTarget): string | undefined
   /** The preset in force, in words. */
   describe(target: ChatTarget): string
   /** Every preset the deployment defines. */
@@ -729,8 +775,9 @@ export class UpdateRouter {
       const list = offered.map((option) => `• <code>${escapeHtml(option)}</code>`).join('\n')
       return await this.say(
         target,
-        `🎚 <code>${escapeHtml(effort.describe(target))}</code>\n\n${list}\n\n` +
-          'Change it with <code>/effort high</code>.',
+        `🎚 <code>${escapeHtml(effort.describe(target))}</code>` +
+          originNote(effort, target) +
+          `\n\n${list}\n\nChange it with <code>/effort high</code>.`,
       )
     }
 
@@ -775,8 +822,9 @@ export class UpdateRouter {
     if (wanted === '') {
       return await this.say(
         target,
-        `👁 <code>${escapeHtml(vision.describe(target))}</code>\n\n` +
-          'See what is configured with <code>/model list</code>, change it with ' +
+        `👁 <code>${escapeHtml(vision.describe(target))}</code>` +
+          originNote(vision, target) +
+          '\n\nSee what is configured with <code>/model list</code>, change it with ' +
           '<code>/vision provider/model</code>, or turn it off with ' +
           '<code>/vision off</code>.',
       )
@@ -786,8 +834,9 @@ export class UpdateRouter {
       await vision.disable(target)
       return await this.say(
         target,
-        `👁 <code>${escapeHtml(vision.describe(target))}</code>\n\n` +
-          'Images now go to the conversation itself, which needs a model that reads them.',
+        `👁 <code>${escapeHtml(vision.describe(target))}</code>` +
+          originNote(vision, target) +
+          '\n\nImages now go to the conversation itself, which needs a model that reads them.',
       )
     }
 
@@ -838,8 +887,9 @@ export class UpdateRouter {
       const list = offered.map((option) => `• <code>${escapeHtml(option)}</code>`).join('\n')
       return await this.say(
         target,
-        `🔐 <code>${escapeHtml(permission.describe(target))}</code>\n\n${list}\n\n` +
-          'Change it with <code>/permission read-only</code>.',
+        `🔐 <code>${escapeHtml(permission.describe(target))}</code>` +
+          originNote(permission, target) +
+          `\n\n${list}\n\nChange it with <code>/permission read-only</code>.`,
       )
     }
 
@@ -884,8 +934,9 @@ export class UpdateRouter {
     if (wanted === '') {
       return await this.say(
         target,
-        `🧠 <code>${escapeHtml(models.describe(target))}</code>\n\n` +
-          'See them with <code>/model list</code>, or change it with ' +
+        `🧠 <code>${escapeHtml(models.describe(target))}</code>` +
+          originNote(models, target) +
+          '\n\nSee them with <code>/model list</code>, or change it with ' +
           '<code>/model provider/model</code>.',
       )
     }

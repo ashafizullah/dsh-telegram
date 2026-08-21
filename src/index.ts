@@ -528,6 +528,12 @@ async function start(
                 ? 'nothing configured'
                 : formatRoute(visionRouteFor(target))
             },
+            origin: (target) =>
+              chosenVision.forChat(target) === undefined
+                ? undefined
+                : `this chat; the deployment default is ${
+                    config.media.visionModel || 'nothing configured'
+                  }`,
             async choose(target, input) {
               const providers = await listCatalog(catalog as unknown as ProviderCatalog).catch(() => [])
               const matched = matchRoute(input, providers)
@@ -615,6 +621,10 @@ async function start(
           permission: {
             describe: (target) =>
               chosenPermissions.forChat(target) ?? (config.permissionPreset || 'the deployment default'),
+            origin: (target) =>
+              chosenPermissions.forChat(target) === undefined
+                ? undefined
+                : `this chat; otherwise ${config.permissionPreset || 'the deployment default'}`,
             options: () => permission.names,
             async choose(target, input) {
               const matched = matchPreset(input, permission.names)
@@ -640,6 +650,10 @@ async function start(
           effort: {
             describe: (target) =>
               chosenEfforts.forChat(target) ?? "the model's own default",
+            origin: (target) =>
+              chosenEfforts.forChat(target) === undefined
+                ? undefined
+                : "this chat; otherwise the model's own default",
             model: (target) => formatRoute(chosenRoute(target) ?? selectModel(ctx, logger)),
             async options(target) {
               const reasoning = await effortsFor(
@@ -665,6 +679,7 @@ async function start(
             catalog: catalog as unknown as ProviderCatalog,
             store: chosenModels,
             chosen: chosenRoute,
+            stored: (target) => chosenModels.forChat(target),
             fallback: () => selectModel(ctx, logger),
           }),
         }
@@ -919,10 +934,17 @@ function buildModelControl(options: {
   catalog: ProviderCatalog
   store: ChatPreferences
   chosen: (target: ChatTarget) => ModelRoute | undefined
+  /** What this conversation stored, as opposed to what is in force. */
+  stored: (target: ChatTarget) => string | undefined
   fallback: () => ModelRoute | undefined
 }): ModelControl {
   return {
     describe: (target) => formatRoute(options.chosen(target) ?? options.fallback()),
+
+    origin: (target) =>
+      options.stored(target) === undefined
+        ? undefined
+        : `this chat; the deployment default is ${formatRoute(options.fallback())}`,
 
     async list() {
       let providers: CatalogProvider[]

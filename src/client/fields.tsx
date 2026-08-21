@@ -26,10 +26,21 @@ const TEXT = {
   tertiary: 'var(--dsw-alias-label-tertiary, #9ca3af)',
 } as const
 
-/** Surface colours. Safe to paint. */
+/**
+ * Surface colours. Safe to paint.
+ *
+ * `brand` is a trap worth naming: despite the word, the shell resolves it to a
+ * NEUTRAL — `#0f1115` in the light theme and `#f9fafb` in the dark one. It is
+ * the high-contrast-against-the-page colour, not an accent. Anything painted
+ * with it must take its foreground from `brandInvert`, which is the other end
+ * of the same pair; hardcoding white there produced a switch whose knob
+ * vanished into its own track in dark mode.
+ */
 const FILL = {
-  /** The shell's accent, used for focus rings and selected state. */
+  /** High contrast against the page. Near-black in light, near-white in dark. */
   brand: 'var(--dsw-alias-brand-primary, #4d6bfe)',
+  /** The readable foreground for anything painted with {@link FILL.brand}. */
+  brandInvert: 'var(--dsw-alias-brand-primary-invert, #fff)',
   surface: 'var(--dsw-alias-bg-layer-1, transparent)',
   /** A neutral track: a border token reads as a faint fill in both themes. */
   neutral: 'var(--dsw-alias-border-l2, rgba(128,128,128,0.45))',
@@ -230,7 +241,9 @@ export function Toggle(props: { checked: boolean; onChange: (next: boolean) => v
         width: 40,
         height: 22,
         padding: 2,
-        border: '1px solid transparent',
+        // Never transparent: a track whose colour happens to match the page
+        // would otherwise stop reading as a control at all.
+        border: `1px solid ${COLOR.border}`,
         borderRadius: 999,
         background: props.checked ? FILL.brand : FILL.neutral,
         cursor: props.disabled ? 'default' : 'pointer',
@@ -244,7 +257,10 @@ export function Toggle(props: { checked: boolean; onChange: (next: boolean) => v
           width: 16,
           height: 16,
           borderRadius: '50%',
-          background: '#fff',
+          // Paired with the track rather than fixed: on the brand track the
+          // knob has to be its inverse, or the two are the same colour in
+          // whichever theme puts white on that side.
+          background: props.checked ? FILL.brandInvert : '#fff',
           border: '1px solid rgba(0, 0, 0, 0.12)',
           boxSizing: 'border-box',
           boxShadow: '0 1px 2px rgba(0, 0, 0, 0.2)',

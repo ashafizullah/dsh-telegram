@@ -186,6 +186,13 @@ shorthand matching two presets is refused rather than guessed at. The change
 applies to the conversation in flight as well as the next one, because the
 reason to tighten it is usually the turn about to run.
 
+Each of these is per conversation and sits on top of what the settings page
+configures. That is two surfaces showing related state, so the commands say
+which layer answered: once a conversation has chosen for itself, its reply
+names the deployment default underneath. Without that the page reads as though
+it were lying — it shows one thing while the chat does another, and nothing
+connects them. `/… default` gives a conversation back to the deployment.
+
 `/status` answers all of it in one message — session, directory, model, effort,
 permission — since having to run four commands to learn what you are talking to
 is four commands too many.

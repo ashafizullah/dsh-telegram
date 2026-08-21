@@ -194,6 +194,14 @@ dan `readonly` semuanya nyangkut, sementara singkatan yang cocok ke dua preset
 ditolak, bukan ditebak. Perubahannya berlaku untuk percakapan yang sedang jalan
 juga, karena alasan orang memperketatnya biasanya justru turn yang mau dijalankan.
 
+Semua ini per percakapan, dan duduk **di atas** apa yang diatur halaman
+Settings. Artinya ada dua permukaan yang menampilkan hal berkaitan, jadi
+perintahnya menyebutkan lapisan mana yang menjawab: begitu sebuah percakapan
+memilih sendiri, balasannya ikut menyebut bawaan deployment di bawahnya. Tanpa
+itu halaman Settings terbaca seperti berbohong — dia menampilkan satu hal
+sementara chat-mu melakukan yang lain, dan tidak ada yang menghubungkan
+keduanya. `/… default` mengembalikan percakapan untuk mengikuti deployment lagi.
+
 `/status` menjawab semuanya dalam satu pesan — sesi, direktori, model, effort,
 izin — karena harus menjalankan empat perintah cuma untuk tahu kamu sedang
 bicara dengan apa itu empat perintah kebanyakan.

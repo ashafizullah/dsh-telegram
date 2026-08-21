@@ -96,6 +96,8 @@ async function build(
   let model: string | undefined
   const models = {
     describe: () => model ?? 'the deployment default',
+    origin: () =>
+      model === undefined ? undefined : 'this chat; the deployment default is deepseek/flash',
     list: async () => '<b>DeepSeek</b>\n• <code>deepseek-official/deepseek-v4-pro</code>',
     choose: async (_target: { chatId: string }, input: string) => {
       if (input === 'ambiguous') return { kind: 'ambiguous' as const, candidates: ['a/m', 'b/m'] }
@@ -142,6 +144,8 @@ async function build(
   const visionSeam = {
     describe: () =>
       reader === 'off' ? 'nothing — the conversation itself' : (reader ?? 'nothing configured'),
+    origin: () =>
+      reader === undefined ? undefined : 'this chat; the deployment default is xiaomi/mimo-v2.5',
     choose: async (_target: { chatId: string }, input: string) => {
       if (input === 'ambiguous') return { kind: 'ambiguous' as const, candidates: ['a/m', 'b/m'] }
       if (!input.includes('/')) return { kind: 'unknown' as const }
@@ -840,6 +844,41 @@ describe('UpdateRouter — /effort', () => {
     const { router, said } = await build({ effort: false })
     await router.handle(message('/effort high'))
     expect(said[0]).toContain('does not allow')
+  })
+})
+
+describe('UpdateRouter — saying which layer answered', () => {
+  it('says nothing extra when the chat is simply following the deployment', async () => {
+    // There is one answer then, and pointing at it would be noise.
+    const { router, said } = await build()
+    await router.handle(message('/vision'))
+    expect(said[0]).not.toContain('this chat')
+  })
+
+  it('names the layer beneath once the chat has overridden it', async () => {
+    // Two surfaces show related state — this command and the settings page —
+    // and neither admitting the other is what made the page look like it lied.
+    const { router, said } = await build()
+    await router.handle(message('/vision off'))
+    await router.handle(message('/vision'))
+
+    const shown = said[said.length - 1] ?? ''
+    expect(shown).toContain('this chat')
+    expect(shown).toContain('xiaomi/mimo-v2.5')
+  })
+
+  it('says it on the reply that made the change, where the confusion starts', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/vision off'))
+    expect(said[0]).toContain('this chat')
+  })
+
+  it('does it for /model too', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/model xiaomi/mimo-v2.5'))
+    await router.handle(message('/model'))
+
+    expect(said[said.length - 1]).toContain('this chat')
   })
 })
 
