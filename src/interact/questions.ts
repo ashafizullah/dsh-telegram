@@ -24,6 +24,7 @@
  */
 
 import { escapeHtml } from '../render/escape.js'
+import { clamp, escapeWithin } from '../render/clamp.js'
 import type {
   AskUserQuestionAnswer,
   AskUserQuestionAnswerItem,
@@ -47,6 +48,17 @@ const DONE_INDEX = -2
 
 /** Telegram truncates long button labels awkwardly; do it deliberately instead. */
 const MAX_BUTTON_LABEL = 48
+
+/**
+ * Budgets for the model-authored parts of a prompt. Together with the option
+ * cap below they keep the assembled message inside Telegram's 4096-character
+ * limit, so a verbose question can never become a question nobody is shown.
+ */
+const HEADER_BUDGET = 120
+const QUESTION_BUDGET = 1200
+const DESCRIPTION_BUDGET = 220
+/** Descriptions rendered in the body; the rest are still selectable buttons. */
+const MAX_DESCRIBED_OPTIONS = 8
 
 /** Thrown when the agent abandons a question before the user answers it. */
 export class QuestionCancelledError extends Error {
@@ -176,7 +188,7 @@ export class TelegramQuestionProvider implements UserQuestionProvider {
       if (press.index === OTHER_INDEX) {
         const custom = await this.options.readText(target, signal)
         if (custom === undefined) throw new QuestionCancelledError()
-        await this.retire(target, messageId, question, `Answered: ${custom}`)
+        await this.retire(target, messageId, question, `Answered: ${clamp(custom, 200)}`)
         return { id: question.id, selected: [], custom }
       }
 
@@ -217,7 +229,7 @@ export class TelegramQuestionProvider implements UserQuestionProvider {
     outcome: string,
   ): Promise<void> {
     if (messageId === undefined) return
-    const html = `${renderPrompt(question, [])}\n\n<b>${escapeHtml(outcome)}</b>`
+    const html = `${renderPrompt(question, [])}\n\n<b>${escapeWithin(outcome, 400)}</b>`
     await this.options.surface.edit(target, messageId, html, []).catch(() => undefined)
   }
 }
@@ -252,14 +264,20 @@ function toggle(selected: readonly number[], index: number): number[] {
 function renderPrompt(question: AskUserQuestionItem, selected: readonly number[]): string {
   const lines: string[] = []
 
-  if (question.header) lines.push(`<b>${escapeHtml(question.header)}</b>`)
-  lines.push(escapeHtml(question.question))
+  if (question.header) lines.push(`<b>${escapeWithin(question.header, HEADER_BUDGET)}</b>`)
+  lines.push(escapeWithin(question.question, QUESTION_BUDGET))
 
-  const described = (question.options ?? []).filter((option) => option.description)
+  const described = (question.options ?? [])
+    .filter((option) => option.description)
+    .slice(0, MAX_DESCRIBED_OPTIONS)
+
   if (described.length > 0) {
     lines.push('')
     for (const option of described) {
-      lines.push(`• <b>${escapeHtml(option.label)}</b> — ${escapeHtml(option.description as string)}`)
+      lines.push(
+        `• <b>${escapeWithin(option.label, MAX_BUTTON_LABEL * 2)}</b> — ` +
+          `${escapeWithin(option.description as string, DESCRIPTION_BUDGET)}`,
+      )
     }
   }
 

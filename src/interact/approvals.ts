@@ -14,6 +14,7 @@
  */
 
 import { escapeHtml } from '../render/escape.js'
+import { escapeWithin } from '../render/clamp.js'
 import type { ApprovalOutcome, ApprovalRequest } from '../harness/types.js'
 import type { InlineKeyboard } from '../telegram/types.js'
 
@@ -22,6 +23,14 @@ import type { PendingRegistry } from './pending.js'
 
 /** Prefix marking callback data as belonging to an approval. */
 const KIND = 'a'
+
+/**
+ * Budgets for the two model-authored parts, chosen to leave the assembled
+ * message comfortably inside Telegram's 4096-character limit. A prompt that
+ * cannot be sent is an approval nobody is asked about.
+ */
+const TOOL_NAME_BUDGET = 120
+const REASON_BUDGET = 2600
 
 /** Button order, and the outcome each press produces. */
 const CHOICES: readonly { readonly text: string; readonly outcome: ApprovalOutcome }[] = [
@@ -138,10 +147,13 @@ export function decodeApprovalCallback(data: string | undefined): Press | undefi
  * generated text control the formatting.
  */
 function renderRequest(request: ApprovalRequest): string {
-  const lines = [`🔐 <b>Approval needed</b>`, `Tool: <code>${escapeHtml(request.toolName)}</code>`]
+  const lines = [
+    `🔐 <b>Approval needed</b>`,
+    `Tool: <code>${escapeWithin(request.toolName, TOOL_NAME_BUDGET)}</code>`,
+  ]
   if (request.reason) {
     lines.push('')
-    lines.push(`<blockquote>${escapeHtml(request.reason)}</blockquote>`)
+    lines.push(`<blockquote>${escapeWithin(request.reason, REASON_BUDGET)}</blockquote>`)
   }
   return lines.join('\n')
 }

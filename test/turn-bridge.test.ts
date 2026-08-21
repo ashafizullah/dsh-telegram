@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { TurnBridge } from '../src/reply/turn-bridge.js'
 import type { SessionEvent } from '../src/reply/turn-bridge.js'
+import { canStreamTo } from '../src/reply/rich-stream.js'
 import type { RichChat } from '../src/reply/rich-stream.js'
 
 /** A Bot API stand-in recording every rich call the bridge makes. */
@@ -250,5 +251,26 @@ describe('TurnBridge — groups, which have no draft api', () => {
 
     expect(chat.edits).toHaveLength(1)
     expect(chat.edits[0]?.markdown).toBe('the answer')
+  })
+})
+
+describe('canStreamTo', () => {
+  it('streams to a private chat when streaming is on', () => {
+    expect(canStreamTo('562660734', true)).toBe(true)
+  })
+
+  it('does not stream when the operator switched it off', () => {
+    // The switch used to be read as "which throttle to use", so turning it off
+    // changed nothing at all.
+    expect(canStreamTo('562660734', false)).toBe(false)
+  })
+
+  it('does not stream to a group even when streaming is on', () => {
+    // Groups carry negative ids and have no draft API.
+    expect(canStreamTo('-1001234567890', true)).toBe(false)
+  })
+
+  it('does not stream to a group with streaming off either', () => {
+    expect(canStreamTo('-1001234567890', false)).toBe(false)
   })
 })

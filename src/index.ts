@@ -31,6 +31,7 @@ import { TelegramQuestionProvider } from './interact/questions.js'
 import { telegramSurface } from './interact/surface.js'
 import { TextCapture } from './interact/text-capture.js'
 import { TurnBridge } from './reply/turn-bridge.js'
+import { canStreamTo } from './reply/rich-stream.js'
 import { UpdateRouter } from './router.js'
 import { BindingStore } from './session/bindings.js'
 import { SessionRunner } from './session/runner.js'
@@ -246,9 +247,8 @@ async function start(
   const turns = new TurnBridge({
     chat: api,
     targetOf,
-    // Only a private chat has a draft API; a group id is negative.
-    canDraft: (chat) => !chat.chatId.startsWith('-'),
-    ...(config.streaming.enabled ? { throttleMs: config.streaming.throttleMs } : {}),
+    canDraft: (chat) => canStreamTo(chat.chatId, config.streaming.enabled),
+    throttleMs: config.streaming.throttleMs,
     placeholder: config.streaming.placeholder,
     logger,
   })

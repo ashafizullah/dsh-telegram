@@ -41,6 +41,22 @@ export const DEFAULT_THROTTLE_MS = 1200
  */
 const HEARTBEAT_MS = 20_000
 
+/**
+ * Whether a conversation can show a reply as it is written.
+ *
+ * Two independent reasons it cannot, and conflating them is how the operator's
+ * switch came to do nothing: streaming may be turned off, or the conversation
+ * may be a group, which has no draft API at all. Telegram gives groups and
+ * channels negative ids, which is the only signal available before a message
+ * arrives.
+ *
+ * @param chatId - the conversation's Telegram id.
+ * @param streamingEnabled - the operator's setting.
+ */
+export function canStreamTo(chatId: string, streamingEnabled: boolean): boolean {
+  return streamingEnabled && !chatId.startsWith('-')
+}
+
 /** The Bot API surface a reply needs. */
 export interface RichChat {
   sendRichMessage(options: {
