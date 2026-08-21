@@ -24,14 +24,18 @@ jobs:
       # The whole mechanism: without this the OIDC token is never minted and
       # npm has nothing to trust.
       id-token: write
-      contents: read
+      # Write, not read, because this job also cuts the GitHub release. The two
+      # sides drifting apart is the failure this prevents: the first version
+      # published here had no tag for months, because tagging was a step a
+      # person had to remember.
+      contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -63,3 +67,14 @@ jobs:
       # Provenance is attached automatically, so the published tarball carries
       # a signed record of the commit and workflow that built it.
       - run: npm publish --access public
+
+      # Cut after the publish, never before: a release announcing a version the
+      # registry rejected is worse than no release at all.
+      - name: cut the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
