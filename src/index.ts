@@ -301,7 +301,6 @@ async function start(
     typing,
     canDraft: (chat) => canStreamTo(chat.chatId, config.streaming.enabled),
     throttleMs: config.streaming.throttleMs,
-    placeholder: config.streaming.placeholder,
     onFailure: (sessionId, failure) => void recovery.offer(sessionId, failure),
     logger,
   })

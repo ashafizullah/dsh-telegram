@@ -68,7 +68,6 @@ export interface TurnBridgeOptions {
    */
   readonly canDraft: (target: ChatTarget) => boolean
   readonly throttleMs?: number
-  readonly placeholder?: string
   readonly heartbeatMs?: number
   /**
    * Called when a turn ends in failure.
@@ -168,7 +167,6 @@ export class TurnBridge {
       // than replacing it. Non-zero is required.
       draftId: draftIdFor(sessionId, event.data.turn),
       ...(this.options.throttleMs !== undefined ? { throttleMs: this.options.throttleMs } : {}),
-      ...(this.options.placeholder !== undefined ? { placeholder: this.options.placeholder } : {}),
       ...(this.options.heartbeatMs !== undefined ? { heartbeatMs: this.options.heartbeatMs } : {}),
       logger: this.logger,
     })

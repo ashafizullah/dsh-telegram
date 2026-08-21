@@ -48,13 +48,6 @@ export const Config = Schema.object({
     throttleMs: Schema.natural()
       .default(1200)
       .description('Minimum gap between edits; Telegram rate-limits rapid edits to one chat.'),
-    placeholder: Schema.string()
-      .default('…')
-      .description(
-        'Body shown under a tool-activity line before any text has arrived. ' +
-          "Nothing is posted merely because a turn opened — Telegram's own " +
-          'typing indicator covers that.',
-      ),
   }),
 
   media: Schema.object({

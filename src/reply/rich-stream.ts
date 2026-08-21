@@ -89,7 +89,6 @@ export interface RichReplyOptions {
   readonly draftId: number
   readonly throttleMs?: number
   readonly limit?: number
-  readonly placeholder?: string
   /**
    * Called once, when this turn first shows something in the chat.
    *
@@ -107,7 +106,6 @@ export class RichReplyStream {
   private readonly target: ChatTarget
   private readonly throttleMs: number
   private readonly limit: number
-  private readonly placeholder: string
   private readonly heartbeatMs: number
   private readonly logger: Logger
 
@@ -138,7 +136,6 @@ export class RichReplyStream {
     this.target = options.target
     this.throttleMs = options.throttleMs ?? DEFAULT_THROTTLE_MS
     this.limit = options.limit ?? RICH_MESSAGE_LIMIT
-    this.placeholder = options.placeholder ?? '…'
     this.heartbeatMs = options.heartbeatMs ?? HEARTBEAT_MS
     this.logger = options.logger ?? SILENT_LOGGER
   }
@@ -284,10 +281,15 @@ export class RichReplyStream {
   /** Send the current buffer as a draft frame, if anything moved. */
   private async frame(): Promise<void> {
     if (this.finished) return
+
     // The activity line alone is worth a frame: during a long tool call it is
     // the only thing that changes, and it is the whole point of showing it.
-    const body = this.buffer === '' ? this.placeholder : this.buffer
-    await this.draft(body)
+    // With neither there is nothing to draw, and Telegram refuses an empty
+    // draft anyway — so the previous frame stays, which is what the reader
+    // was looking at.
+    if (this.buffer === '' && this.activity === undefined) return
+
+    await this.draft(this.buffer)
   }
 
   /**
@@ -299,9 +301,21 @@ export class RichReplyStream {
   private armHeartbeat(): void {
     if (this.heartbeat || this.heartbeatMs <= 0) return
     this.heartbeat = setInterval(() => {
-      if (this.finished) return
-      void this.enqueue(() => this.draft(this.buffer === '' ? this.placeholder : this.shown))
+      if (this.finished || this.shown === '') return
+      // Re-sends exactly what is on screen. Keeping a preview alive means
+      // repeating it, not replacing it with something that says less.
+      void this.enqueue(() => this.repeat())
     }, this.heartbeatMs)
+  }
+
+  /** Re-send the frame already showing, to hold it past the draft's expiry. */
+  private async repeat(): Promise<void> {
+    await this.chat.sendRichMessageDraft({
+      chatId: this.target.chatId,
+      draftId: this.options.draftId,
+      markdown: this.shown,
+      ...(this.target.threadId !== undefined ? { threadId: this.target.threadId } : {}),
+    })
   }
 
   /** Run one send after the previous one, containing its failures. */

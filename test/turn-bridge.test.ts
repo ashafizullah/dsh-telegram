@@ -385,13 +385,36 @@ describe('TurnBridge — showing what the agent is doing', () => {
     expect(chat.frame()).not.toContain('a.ts')
   })
 
-  it('clears the line once the tool answers', async () => {
+  it('leaves the finished tool on screen rather than replacing it with less', async () => {
+    // Telegram refuses an empty draft, so clearing the line with nothing to
+    // put in its place used to mean drawing an ellipsis — trading the last
+    // thing that happened for a frame that says nothing.
     const { bridge, chat } = build()
     await bridge.handle('S', start)
     await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
     await bridge.handle('S', { type: 'tool/result', data: { turn: 1 } })
 
+    expect(chat.frame()).toContain('bash: npm test')
+    expect(chat.drafts).toHaveLength(1)
+  })
+
+  it('clears the line as soon as there is text to replace it with', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', toolCall('bash', '{"command":"npm test"}'))
+    await bridge.handle('S', { type: 'tool/result', data: { turn: 1 } })
+    await bridge.handle('S', delta('All 42 passed'))
+
     expect(chat.frame()).not.toContain('tg-thinking')
+    expect(chat.frame()).toContain('All 42 passed')
+  })
+
+  it('draws nothing at all when there is nothing to draw', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', { type: 'tool/result', data: { turn: 1 } })
+
+    expect(chat.drafts).toHaveLength(0)
   })
 
   it('keeps the reply text alongside the activity line', async () => {

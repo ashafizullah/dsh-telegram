@@ -28,7 +28,7 @@ export interface TelegramSettings {
   cwd: string
   timeoutMs: number
   longPollSeconds: number
-  streaming: { enabled: boolean; throttleMs: number; placeholder: string }
+  streaming: { enabled: boolean; throttleMs: number }
   media: { enabled: boolean; maxBytes: number; maxTextChars: number; visionModel: string }
   screenshot: { enabled: boolean }
   reconnect: { baseDelayMs: number; maxDelayMs: number }
@@ -208,14 +208,6 @@ export function TelegramPanel({ scope, remote, t }: PanelProps) {
           />
         </Row>
 
-        <Row label={t('placeholder')}>
-          <CommittedText
-            value={value.streaming.placeholder}
-            width={120}
-            disabled={locked}
-            onCommit={(next) => writeNested('streaming', { placeholder: next })}
-          />
-        </Row>
       </Section>
 
       <Section title={t('advancedTitle')}>

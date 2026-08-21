@@ -436,7 +436,6 @@ masalah.
 | `screenshot.enabled` | `false` | Izinkan `/screenshot`. Bawaannya mati; di macOS juga butuh izin Screen Recording |
 | `streaming.enabled` | `true` | Tampilkan jawaban sambil ditulis |
 | `streaming.throttleMs` | `1200` | Jeda minimum antar frame stream |
-| `streaming.placeholder` | `…` | Isi yang ditampilkan di bawah baris tool sebelum teks pertama tiba |
 | `timeoutMs` | `30000` | Batas waktu tiap permintaan Bot API |
 | `longPollSeconds` | `25` | Berapa lama Telegram menahan poll kosong |
 | `media.enabled` | `true` | Baca gambar dan berkas teks yang dikirim |
@@ -544,6 +543,12 @@ dikirim ulang sebelum sempat hangus, jadi masa tunggu waktu router membaca
 lampiran dan masa tunggu waktu turn-nya jalan bisa saling menyambung dengan
 rapi — typing baru berhenti waktu yang terakhir selesai. Ada batas sepuluh menit
 buat jaga-jaga kalau ada yang lupa berhenti.
+
+Tidak ada yang pernah digambar ulang dengan isi yang lebih sedikit dari
+sebelumnya. Kalau sebuah tool selesai dan belum ada teks, baris yang menyebut
+tool itu tetap bertahan sampai ada teks sungguhan yang menggantikannya —
+Telegram menolak draft kosong, jadi alternatifnya adalah menukar hal terakhir
+yang terjadi dengan frame yang tidak mengatakan apa-apa.
 
 Selagi agent bekerja, tool yang sedang jalan ditampilkan di atas balasan dalam
 blok `<tg-thinking>`:

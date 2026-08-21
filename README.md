@@ -413,7 +413,6 @@ Every field has a working default; an empty config runs.
 | `screenshot.enabled` | `false` | Allow `/screenshot`. Off by default; macOS also needs Screen Recording permission |
 | `streaming.enabled` | `true` | Show the answer as it is written |
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
-| `streaming.placeholder` | `…` | Body shown under a tool-activity line before any text arrives |
 | `timeoutMs` | `30000` | Per-request Bot API timeout |
 | `longPollSeconds` | `25` | How long Telegram holds an empty poll open |
 | `media.enabled` | `true` | Read images and text files the user sends |
@@ -517,6 +516,11 @@ started and died. Holds are counted per conversation and re-sent inside their
 own expiry, so the router's hold while it reads an attachment and the bridge's
 hold over the turn that follows overlap cleanly, and typing stops when the last
 of them lets go. A ten-minute backstop covers a release that never arrives.
+
+Nothing is ever redrawn with less than it showed before. When a tool finishes
+and there is no text yet, the line naming it stays until real text replaces it
+— Telegram refuses an empty draft, so the alternative was trading the last
+thing that happened for a frame that said nothing.
 
 While the agent works, the running tool is shown above the reply in a
 `<tg-thinking>` block:
