@@ -18,10 +18,12 @@
  */
 
 import { homedir } from 'node:os'
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { AccessPolicy } from './access.js'
+import type { ChatTarget } from './interact/surface.js'
 import { commandMenu } from './commands.js'
 import { StatusFile, describeError } from './diagnostics.js'
 import { SecretRegistry } from './secrets.js'
@@ -37,6 +39,7 @@ import { UpdateRouter } from './router.js'
 import { BindingStore } from './session/bindings.js'
 import { RecoveryOffer } from './session/recovery.js'
 import { SessionRunner } from './session/runner.js'
+import { WorkspaceStore, resolveDirectory } from './session/workspaces.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
@@ -289,6 +292,11 @@ async function start(
 
   const cwd = config.cwd || process.cwd()
 
+  // Kept apart from the bindings deliberately: a binding dies with `/new`,
+  // while the directory a person chose belongs to the chat and must outlive it.
+  const workspaces = await WorkspaceStore.open(join(home, 'workspaces.json'))
+  const cwdFor = (target: ChatTarget) => workspaces.forChat(target) ?? cwd
+
   // Shares the host with the runner so a reading runs on the same harness the
   // conversation does — but never in the conversation's own session.
   const extractor = new VisionExtractor({
@@ -301,7 +309,7 @@ async function start(
   const runner = new SessionRunner({
     host,
     bindings,
-    cwd,
+    cwdFor,
     extractor,
     // The fallback for a picture that could not be read: the conversation
     // itself moves, and stays moved.
@@ -342,6 +350,12 @@ async function start(
     approvals,
     recovery,
     typing,
+    workspace: {
+      current: cwdFor,
+      resolve: (input, current) => resolveDirectory(input, current, homedir()),
+      inspect: inspectDirectory,
+      set: (target, directory) => workspaces.set(target, directory),
+    },
     textCapture,
     runner,
     ...(me.username ? { botUsername: me.username } : {}),
@@ -568,6 +582,28 @@ function selectModel(ctx: PluginContext, logger: Logger): ModelRoute | undefined
  */
 function attachmentStore(ctx: PluginContext): unknown {
   return ctx.get('attachments')
+}
+
+/**
+ * What is actually at a path the user named.
+ *
+ * Four answers rather than a boolean: "no such directory" and "that is a file"
+ * are different mistakes, and a permission failure is neither — telling them
+ * apart is the difference between a message someone can act on and one they
+ * have to guess at.
+ *
+ * @param directory - an absolute path.
+ */
+async function inspectDirectory(
+  directory: string,
+): Promise<'directory' | 'file' | 'missing' | 'denied'> {
+  try {
+    return (await stat(directory)).isDirectory() ? 'directory' : 'file'
+  } catch (error) {
+    const code = (error as { code?: string }).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return 'missing'
+    return 'denied'
+  }
 }
 
 /** Resolve the bot token through the harness credential seam. */

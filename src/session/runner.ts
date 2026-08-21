@@ -80,8 +80,16 @@ export interface PromptResolver {
 export interface SessionRunnerOptions {
   readonly host: AgentHost
   readonly bindings: BindingStore
-  /** Working directory new sessions start in. */
-  readonly cwd: string
+  /**
+   * The directory a conversation's next session opens in.
+   *
+   * Per conversation rather than one value, because `/cd` is per chat — and
+   * read late, so a change reaches the next session rather than the next
+   * restart. A session's own cwd never moves: the sandbox derives its writable
+   * root from it and the harness calls that root immutable, which is why
+   * changing directory starts a fresh conversation.
+   */
+  readonly cwdFor: (target: ChatTarget) => string
   /** Session id factory; injected so tests can assert on stable ids. */
   readonly newSessionId?: () => string
   /**
@@ -218,7 +226,14 @@ export class SessionRunner implements AgentRunner {
    */
   async status(target: ChatTarget): Promise<string> {
     const binding = this.options.bindings.forChat(target)
-    if (!binding) return 'No conversation yet — send a message to start one.'
+    if (!binding) {
+      // Still worth naming the directory: it is what the next message opens in,
+      // and `/cd` before the first message is a reasonable thing to do.
+      return [
+        'No conversation yet — send a message to start one.',
+        `<b>Working directory</b> <code>${escapeHtml(this.options.cwdFor(target))}</code>`,
+      ].join('\n')
+    }
 
     const live = this.options.host.live(binding.sessionId) !== undefined
     return [
@@ -226,7 +241,7 @@ export class SessionRunner implements AgentRunner {
       // Telegram refuse the whole message, and a working directory is a path
       // the operator chose, not a value this plugin controls.
       `<b>Session</b> <code>${escapeHtml(binding.sessionId)}</code>`,
-      `<b>Working directory</b> <code>${escapeHtml(this.options.cwd)}</code>`,
+      `<b>Working directory</b> <code>${escapeHtml(this.options.cwdFor(target))}</code>`,
       `<b>State</b> ${live ? 'loaded' : 'idle (will resume on your next message)'}`,
       `<b>Since</b> ${new Date(binding.createdAt).toISOString()}`,
     ].join('\n')
@@ -258,7 +273,7 @@ export class SessionRunner implements AgentRunner {
     }
 
     const sessionId = this.newSessionId()
-    const agent = await this.options.host.create(sessionId, this.options.cwd)
+    const agent = await this.options.host.create(sessionId, this.options.cwdFor(target))
     await this.options.bindings.bind(target, sessionId)
     return agent
   }

@@ -110,9 +110,27 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/help` | List the commands |
 | `/claim <code>` | Take ownership of an unclaimed bot |
 | `/new` | Start a fresh conversation, forgetting the current one |
+| `/cd [path]` | Show or change the working directory |
 | `/status` | Session id, working directory, and whether it is loaded |
 | `/stop` | Cancel whatever the agent is doing right now |
 | `/whoami` | Your Telegram user id |
+
+### Where the agent works
+
+`/cd` on its own says where the conversation is; `/cd ~/projects/app` moves it.
+Absolute paths, `~`, and paths relative to where the conversation already is all
+work, and a pasted path keeps its quotes off.
+
+Moving starts a fresh conversation, and the bot says so. That is not a shortcut:
+the sandbox derives its writable root from the session's working directory, and
+that root is fixed when the session opens — so a directory change is a new
+session by construction. The choice is remembered per chat and survives both
+`/new` and a restart, which is why it is kept apart from the session binding
+that `/new` discards.
+
+A directory that does not exist, one that turns out to be a file, and one that
+cannot be read are three different mistakes and get three different sentences.
+Each leaves the conversation exactly where it was.
 
 They are published to Telegram on every connection, so typing `/` in the chat
 offers the list with descriptions. `/claim` drops off it once the bot has an
@@ -223,7 +241,7 @@ Every field has a working default; an empty config runs.
 | `tokenRef` | `TELEGRAM_BOT_TOKEN` | Credential reference holding the token |
 | `baseUrl` | `https://api.telegram.org` | Bot API origin; change only for a proxy |
 | `allowFrom` | `[]` | User ids allowed in; empty enables the claim flow |
-| `cwd` | harness cwd | Working directory new conversations start in |
+| `cwd` | harness cwd | Directory a conversation starts in until `/cd` moves it |
 | `streaming.enabled` | `true` | Show the answer as it is written |
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
 | `streaming.placeholder` | `…` | Body shown under a tool-activity line before any text arrives |
@@ -334,7 +352,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 561 tests
+pnpm test          # 592 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle
@@ -365,7 +383,8 @@ would break every hook the moment the page mounted.
   allowlisted user — no mention or reply required.
 - **Reasoning effort is not carried.** Only provider and model reach a Telegram
   session; an effort chosen in Settings → Models does not.
-- **One working directory.** Every conversation starts in the same `cwd`.
+- **One directory per conversation.** `/cd` moves a conversation, but a
+  session cannot be moved: the change starts a fresh one.
 - **No voice, audio or video.** The harness attachment seam takes images only.
 
 ## License

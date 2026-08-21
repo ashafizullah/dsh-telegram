@@ -45,6 +45,23 @@ export interface RouterChat {
   answerCallbackQuery(id: string, text?: string): Promise<void>
 }
 
+/**
+ * The conversation's working directory, and how to change it.
+ *
+ * Narrowed to what the router needs so `/cd` is testable without a filesystem:
+ * `inspect` is the only call that touches disk.
+ */
+export interface WorkspaceControl {
+  /** The directory this conversation's next session will open in. */
+  current(target: ChatTarget): string
+  /** Work out which directory an argument names; undefined when it names none. */
+  resolve(input: string, current: string): string | undefined
+  /** What is actually at that path. */
+  inspect(directory: string): Promise<'directory' | 'file' | 'missing' | 'denied'>
+  /** Remember it for this conversation. */
+  set(target: ChatTarget, directory: string): Promise<void>
+}
+
 /** Shows that a conversation is being worked on, until released. */
 export interface TypingHold {
   hold(target: ChatTarget): () => void
@@ -68,6 +85,8 @@ export interface UpdateRouterOptions {
    * leaves the chat quiet until the reply arrives.
    */
   readonly typing?: TypingHold
+  /** Absent leaves every conversation in the configured directory. */
+  readonly workspace?: WorkspaceControl
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
@@ -235,6 +254,9 @@ export class UpdateRouter {
         await this.options.runner.reset(target)
         return await this.say(target, '🆕 Started a fresh conversation.')
 
+      case 'cd':
+        return await this.onChangeDirectory(target, args)
+
       case 'stop': {
         const stopped = await this.options.runner.stop(target)
         return await this.say(target, stopped ? '🛑 Stopped.' : 'Nothing was running.')
@@ -265,6 +287,69 @@ export class UpdateRouter {
     } finally {
       release?.()
     }
+  }
+
+  /**
+   * Show or change the conversation's working directory.
+   *
+   * Changing it necessarily starts a fresh conversation: the sandbox derives
+   * its writable root from the session's cwd, and that root is fixed when the
+   * session opens. Rather than fail a move the user reasonably expects to
+   * work, the reset is done for them and said out loud.
+   *
+   * @param target - the conversation.
+   * @param args - what followed `/cd`; empty means "tell me where I am".
+   */
+  private async onChangeDirectory(target: ChatTarget, args: string): Promise<void> {
+    const workspace = this.options.workspace
+    const current = workspace?.current(target)
+
+    if (!workspace || current === undefined) {
+      return await this.say(target, 'This deployment does not allow changing directory.')
+    }
+
+    if (args.trim() === '') {
+      return await this.say(
+        target,
+        `📁 <code>${escapeHtml(current)}</code>\n\nChange it with <code>/cd ~/projects/app</code>.`,
+      )
+    }
+
+    const wanted = workspace.resolve(args, current)
+    if (wanted === undefined) {
+      return await this.say(target, 'Give me a directory: <code>/cd ~/projects/app</code>')
+    }
+
+    if (wanted === current) {
+      return await this.say(target, `Already in <code>${escapeHtml(wanted)}</code>.`)
+    }
+
+    const verdict = await workspace.inspect(wanted)
+    if (verdict !== 'directory') {
+      const why =
+        verdict === 'file'
+          ? 'that is a file, not a directory'
+          : verdict === 'denied'
+            ? 'it cannot be read'
+            : 'no such directory'
+      return await this.say(target, `⚠️ Cannot use <code>${escapeHtml(wanted)}</code> — ${why}.`)
+    }
+
+    try {
+      await workspace.set(target, wanted)
+    } catch (error) {
+      this.logger.error('[dsh-telegram] could not record the working directory', error)
+      return await this.say(target, '⚠️ The directory could not be saved.')
+    }
+
+    // After the directory is recorded, so a failed reset still leaves the
+    // choice in place for the next message rather than losing it silently.
+    await this.options.runner.reset(target)
+    return await this.say(
+      target,
+      `📁 Now working in <code>${escapeHtml(wanted)}</code>.\n\n` +
+        '🆕 Started a fresh conversation — a session keeps the directory it opened in.',
+    )
   }
 
   /** Send one plain notice into a conversation, swallowing delivery failures. */

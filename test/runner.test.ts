@@ -85,7 +85,7 @@ function build(
   return new SessionRunner({
     host,
     bindings,
-    cwd: '/work',
+    cwdFor: () => '/work',
     newSessionId: () => queue.shift() ?? 'exhausted',
     ...(visionRoute ? { visionRoute } : {}),
     ...(extractor ? { extractor } : {}),
@@ -312,7 +312,7 @@ describe('SessionRunner — the status line', () => {
     const runner = new SessionRunner({
       host: fake.host,
       bindings,
-      cwd: '/work/<repo> & co',
+      cwdFor: () => '/work/<repo> & co',
       newSessionId: () => 's1',
     })
 

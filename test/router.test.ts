@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AccessPolicy } from '../src/access.js'
 import { TextCapture } from '../src/interact/text-capture.js'
 import { UpdateRouter } from '../src/router.js'
+import { resolveDirectory } from '../src/session/workspaces.js'
 import type { AgentRunner } from '../src/router.js'
 import type { TelegramUpdate } from '../src/telegram/types.js'
 
@@ -20,6 +21,10 @@ async function build(
     media?: unknown
     /** Omit to run without an indicator at all, as a bare deployment does. */
     typing?: boolean
+    /** What `inspect` reports for whatever path /cd resolves to. */
+    at?: 'directory' | 'file' | 'missing' | 'denied'
+    /** Set false to run without the workspace seam, as a bare deployment does. */
+    workspace?: boolean
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
@@ -50,6 +55,20 @@ async function build(
     },
   }
 
+  /** The conversation's directory, and every /cd that moved it. */
+  let directory = '/work'
+  const moved: string[] = []
+  const workspace = {
+    current: () => directory,
+    resolve: (input: string, current: string) =>
+      resolveDirectory(input, current, '/Users/adam'),
+    inspect: async () => options.at ?? 'directory',
+    set: async (_target: { chatId: string }, next: string) => {
+      moved.push(next)
+      directory = next
+    },
+  }
+
   const router = new UpdateRouter({
     chat: {
       sendMessage: async ({ html }) => void said.push(html),
@@ -59,6 +78,7 @@ async function build(
     questions,
     approvals,
     ...(options.typing === false ? {} : { typing }),
+    ...(options.workspace === false ? {} : { workspace }),
     textCapture,
     runner,
     botUsername: 'my_bot',
@@ -76,8 +96,11 @@ async function build(
     textCapture,
     access,
     holds,
+    moved,
     /** Whether the chat is showing "typing…" right now. */
     typing: () => holds.some((entry) => !entry.released),
+    /** Where the conversation is working now. */
+    directory: () => directory,
   }
 }
 
@@ -195,6 +218,99 @@ describe('UpdateRouter — commands', () => {
     expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, [
       { type: 'text', text: '/deploy staging' },
     ])
+  })
+})
+
+describe('UpdateRouter — /cd', () => {
+  it('reports where the conversation is when given nothing', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/cd'))
+    expect(said[0]).toContain('/work')
+  })
+
+  it('moves the conversation to a directory that exists', async () => {
+    const { router, said, directory } = await build()
+    await router.handle(message('/cd /srv/app'))
+
+    expect(directory()).toBe('/srv/app')
+    expect(said[0]).toContain('/srv/app')
+  })
+
+  it('starts a fresh conversation, because a session keeps its own directory', async () => {
+    // The sandbox derives its writable root from the session's cwd, and that
+    // root is fixed when the session opens — so the move needs a new session.
+    const { router, runner, said } = await build()
+    await router.handle(message('/cd /srv/app'))
+
+    expect(runner.reset).toHaveBeenCalledWith({ chatId: '1' })
+    expect(said[0]).toContain('fresh conversation')
+  })
+
+  it('resolves a path relative to where the conversation already is', async () => {
+    const { router, directory } = await build()
+    await router.handle(message('/cd app'))
+    expect(directory()).toBe('/work/app')
+  })
+
+  it('expands a tilde, which is how anyone types a home path', async () => {
+    const { router, directory } = await build()
+    await router.handle(message('/cd ~/projects/api'))
+    expect(directory()).toBe('/Users/adam/projects/api')
+  })
+
+  it('says so and changes nothing when the directory is not there', async () => {
+    const { router, said, directory, runner } = await build({ at: 'missing' })
+    await router.handle(message('/cd /nope'))
+
+    expect(directory()).toBe('/work')
+    expect(said[0]).toContain('no such directory')
+    expect(runner.reset).not.toHaveBeenCalled()
+  })
+
+  it('tells a file apart from a missing directory', async () => {
+    // Different mistakes deserve different sentences; a boolean would make
+    // both of them "that did not work".
+    const { router, said } = await build({ at: 'file' })
+    await router.handle(message('/cd /work/notes.md'))
+    expect(said[0]).toContain('a file, not a directory')
+  })
+
+  it('tells a permission failure apart from both', async () => {
+    const { router, said } = await build({ at: 'denied' })
+    await router.handle(message('/cd /root/private'))
+    expect(said[0]).toContain('cannot be read')
+  })
+
+  it('does not restart the conversation for a move that goes nowhere', async () => {
+    const { router, said, runner } = await build()
+    await router.handle(message('/cd /work'))
+
+    expect(runner.reset).not.toHaveBeenCalled()
+    expect(said[0]).toContain('Already in')
+  })
+
+  it('keeps the choice even when the reset that follows fails', async () => {
+    // The directory is recorded first on purpose: a failed reset should cost
+    // the user a `/new`, not the directory they just chose.
+    const { router, directory, runner } = await build()
+    runner.reset = vi.fn(async () => {
+      throw new Error('the harness is gone')
+    })
+
+    await router.handle(message('/cd /srv/app')).catch(() => undefined)
+    expect(directory()).toBe('/srv/app')
+  })
+
+  it('says so where the deployment offers no way to change directory', async () => {
+    const { router, said } = await build({ workspace: false })
+    await router.handle(message('/cd /srv/app'))
+    expect(said[0]).toContain('does not allow')
+  })
+
+  it('refuses an unauthorised /cd like any other command', async () => {
+    const { router, directory } = await build()
+    await router.handle(message('/cd /srv/app', STRANGER))
+    expect(directory()).toBe('/work')
   })
 })
 

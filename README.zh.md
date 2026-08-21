@@ -106,9 +106,23 @@ npx @deepseek-ai/dsh credentials set TELEGRAM_BOT_TOKEN
 | `/help` | 列出所有命令 |
 | `/claim <码>` | 认领一个尚未被认领的机器人 |
 | `/new` | 开始新对话，忘掉当前这一段 |
+| `/cd [路径]` | 查看或切换工作目录 |
 | `/status` | 会话 ID、工作目录，以及是否已加载 |
 | `/stop` | 取消 Agent 当前正在做的事 |
 | `/whoami` | 你的 Telegram 用户 ID |
+
+### Agent 在哪里工作
+
+`/cd` 不带参数会告诉你当前对话在哪；`/cd ~/projects/app` 则把它移过去。绝对路径、
+`~`、以及相对当前位置的路径都可以用，粘贴进来的路径会自动去掉引号。
+
+移动目录会开启一段新对话，机器人也会明说。这不是偷懒：沙箱的可写根目录来自会话的
+工作目录，而这个根在会话打开时就已固定——所以切换目录在构造上就等于换一个会话。
+你的选择按聊天记住，`/new` 和重启都不会丢。这正是它与 `/new` 会丢弃的会话绑定分开
+存放的原因。
+
+目录不存在、目标其实是个文件、以及读不到，是三种不同的错误，会得到三种不同的说明。
+三种情况都让对话原地不动。
 
 每次连接时这份列表都会注册到 Telegram，所以在聊天里输入 `/` 就会看到命令提示和
 各自的说明。机器人一旦有了主人，`/claim` 就会从列表里消失——它是唯一一个成功之后
@@ -200,7 +214,7 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 | `tokenRef` | `TELEGRAM_BOT_TOKEN` | 存放 Token 的凭据引用名 |
 | `baseUrl` | `https://api.telegram.org` | Bot API 源站；仅在使用代理时修改 |
 | `allowFrom` | `[]` | 允许的用户 ID；留空则启用认领流程 |
-| `cwd` | harness 的 cwd | 新对话的工作目录 |
+| `cwd` | harness 的 cwd | 对话的起始目录，直到用 `/cd` 切换 |
 | `streaming.enabled` | `true` | 边生成边显示回答 |
 | `streaming.throttleMs` | `1200` | 两帧之间的最小间隔 |
 | `streaming.placeholder` | `…` | 在有正文之前，工具行下方显示的内容 |
@@ -296,7 +310,7 @@ Telegram 只在草稿中接受该块，别处一概不接受，这与它的生�
 
 ```bash
 pnpm install
-pnpm test          # 561 个测试
+pnpm test          # 592 个测试
 pnpm test -- --coverage
 pnpm typecheck     # host 与 browser 两半
 pnpm build         # host 用 tsc，浏览器包用 esbuild
@@ -326,7 +340,8 @@ React 与 shell 自身的包被标记为 external；打包第二份 React 会在
   @提及，也无需回复。
 - **推理强度未被传递。** 只有 provider 和 model 会到达 Telegram 会话；在
   设置 → Models 中选择的推理强度不会。
-- **只有一个工作目录。** 所有对话都从同一个 `cwd` 开始。
+- **每个对话一个目录。** `/cd` 可以移动对话，但会话本身无法移动——切换目录会
+  开启一段新会话。
 - **暂不支持语音、音频或视频。** harness 的附件接缝只接受图片。
 
 ## 许可证

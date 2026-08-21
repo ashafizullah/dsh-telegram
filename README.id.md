@@ -117,9 +117,27 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/help` | Daftar perintah |
 | `/claim <kode>` | Mengambil kepemilikan bot yang belum diklaim |
 | `/new` | Mulai percakapan baru, melupakan yang sekarang |
+| `/cd [path]` | Lihat atau ganti working directory |
 | `/status` | ID sesi, working directory, dan apakah sedang dimuat |
 | `/stop` | Batalkan apa pun yang sedang dikerjakan agent |
 | `/whoami` | User ID Telegram-mu |
+
+### Di mana agent bekerja
+
+`/cd` tanpa apa-apa memberitahu percakapanmu ada di mana; `/cd ~/projects/app`
+memindahkannya. Path absolut, `~`, dan path relatif dari posisi sekarang
+semuanya jalan, dan kalau kamu paste path bertanda kutip, kutipnya dibuang.
+
+Pindah direktori otomatis memulai percakapan baru, dan botnya bilang. Itu bukan
+jalan pintas: sandbox mengambil root tulisnya dari working directory sesi, dan
+root itu terkunci begitu sesinya dibuka — jadi ganti direktori memang berarti
+sesi baru. Pilihanmu diingat per chat dan bertahan melewati `/new` maupun
+restart. Itu sebabnya dia disimpan terpisah dari binding sesi, yang justru
+dibuang oleh `/new`.
+
+Direktori yang tidak ada, yang ternyata sebuah file, dan yang tidak bisa dibaca
+adalah tiga kesalahan berbeda dan dapat tiga kalimat berbeda. Ketiganya
+meninggalkan percakapanmu persis di tempatnya semula.
 
 Daftar ini didaftarkan ke Telegram tiap kali bot tersambung, jadi begitu kamu
 ketik `/` di chat, hint-nya langsung muncul lengkap dengan keterangannya.
@@ -240,7 +258,7 @@ masalah.
 | `tokenRef` | `TELEGRAM_BOT_TOKEN` | Referensi kredensial tempat token disimpan |
 | `baseUrl` | `https://api.telegram.org` | Origin Bot API; ubah hanya untuk proxy |
 | `allowFrom` | `[]` | User ID yang diizinkan; kosong mengaktifkan alur klaim |
-| `cwd` | cwd harness | Working directory untuk percakapan baru |
+| `cwd` | cwd harness | Direktori awal percakapan, sampai dipindah dengan `/cd` |
 | `streaming.enabled` | `true` | Tampilkan jawaban sambil ditulis |
 | `streaming.throttleMs` | `1200` | Jeda minimum antar frame stream |
 | `streaming.placeholder` | `…` | Isi yang ditampilkan di bawah baris tool sebelum teks pertama tiba |
@@ -353,7 +371,7 @@ membaca transkrip.
 
 ```bash
 pnpm install
-pnpm test          # 561 test
+pnpm test          # 592 test
 pnpm test -- --coverage
 pnpm typecheck     # sisi host dan sisi browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser
@@ -387,8 +405,8 @@ kedua ikut terbundel, semua hook rusak begitu halamannya ter-mount.
   yang ada di daftar izin — tanpa perlu di-mention atau di-reply.
 - **Reasoning effort belum ikut terbawa.** Cuma provider dan model yang sampai
   ke sesi Telegram; effort yang kamu pilih di Settings → Models tidak.
-- **Working directory-nya cuma satu.** Semua percakapan mulai dari `cwd` yang
-  sama.
+- **Satu direktori per percakapan.** `/cd` memindahkan percakapan, tapi sesi
+  yang sedang jalan tidak bisa dipindah — pindah direktori memulai sesi baru.
 - **Belum bisa voice, audio, atau video.** Jalur lampiran harness cuma menerima
   gambar.
 
