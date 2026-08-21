@@ -14,7 +14,13 @@ const OWNER = 7
 const STRANGER = 99
 
 /** A router wired to spies, with a real access policy in a temp directory. */
-async function build(options: { allowFrom?: number[]; media?: unknown } = {}) {
+async function build(
+  options: {
+    allowFrom?: number[]
+    media?: unknown
+    chatAction?: (chatId: string, action: string) => void
+  } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
   const access = await AccessPolicy.open(join(dir, 'owner.json'), {
     allowFrom: options.allowFrom ?? [OWNER],
@@ -37,6 +43,9 @@ async function build(options: { allowFrom?: number[]; media?: unknown } = {}) {
     chat: {
       sendMessage: async ({ html }) => void said.push(html),
       answerCallbackQuery: async (id) => void answered.push(id),
+      ...(options.chatAction
+        ? { sendChatAction: async (chatId: string, action: string) => void options.chatAction?.(chatId, action) }
+        : {}),
     },
     access,
     questions,
@@ -414,5 +423,45 @@ describe('UpdateRouter — telling the user what could not be used', () => {
     })
 
     expect(said).toHaveLength(0)
+  })
+})
+
+describe('UpdateRouter — while reading an attachment', () => {
+  it('shows an indicator, since reading can take a while', async () => {
+    const actions: string[] = []
+    const { router } = await build({
+      media: { collect: async () => ({ parts: [{ type: 'text', text: 'ok' }] }) },
+      chatAction: (_chatId: string, action: string) => actions.push(action),
+    })
+
+    await router.handle({
+      update_id: 10,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'abc' }],
+      },
+    })
+
+    expect(actions).toEqual(['typing'])
+  })
+
+  it('reads the attachment even where the indicator is unavailable', async () => {
+    const { router, runner } = await build({
+      media: { collect: async () => ({ parts: [{ type: 'text', text: 'ok' }] }) },
+    })
+
+    await router.handle({
+      update_id: 11,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'abc' }],
+      },
+    })
+
+    expect(runner.prompt).toHaveBeenCalled()
   })
 })

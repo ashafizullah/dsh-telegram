@@ -43,6 +43,12 @@ export interface AgentRunner {
 export interface RouterChat {
   sendMessage(options: { chatId: string; html: string; threadId?: number }): Promise<unknown>
   answerCallbackQuery(id: string, text?: string): Promise<void>
+  /**
+   * Show that something is happening. Reading an attachment can take a while —
+   * a large file, a retried download — and Telegram gives no other sign, so
+   * without this the chat sits silent and the bot looks stuck.
+   */
+  sendChatAction?(chatId: string, action: 'typing' | 'upload_document' | 'upload_photo'): Promise<void>
 }
 
 /** Routes callback data to whichever feature owns it. */
@@ -148,6 +154,9 @@ export class UpdateRouter {
     if (!this.options.media) {
       return await this.say(target, 'This bot is not set up to read attachments.')
     }
+
+    // Reading can take seconds, or longer if a download has to be retried.
+    void this.options.chat.sendChatAction?.(target.chatId, 'typing')
 
     const collected = await this.options.media.collect(message, text)
     // Said first: the user should not have to wait for a reply to learn that

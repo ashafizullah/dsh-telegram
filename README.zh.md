@@ -251,7 +251,7 @@ Telegram 只在草稿中接受该块，别处一概不接受，这与它的生�
 
 ```bash
 pnpm install
-pnpm test          # 456 个测试
+pnpm test          # 462 个测试
 pnpm test -- --coverage
 pnpm typecheck     # host 与 browser 两半
 pnpm build         # host 用 tsc，浏览器包用 esbuild

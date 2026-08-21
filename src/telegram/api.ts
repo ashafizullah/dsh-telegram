@@ -47,7 +47,10 @@ const RETRYABLE = new Set([429, 500, 502, 503, 504])
  * connection open, so it is the call most likely to need a fresh one, and a
  * single flaky connect was turning a sent screenshot into an error.
  */
-const IDEMPOTENT = new Set(['getMe', 'getFile', 'getUpdates', 'deleteWebhook'])
+const IDEMPOTENT = new Set(['getMe', 'getFile', 'getUpdates', 'deleteWebhook', 'downloadFile'])
+
+/** Deadline for one file download; larger than an API call's, for large files. */
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 60_000
 
 /** A Bot API call that failed, with the token stripped from every field. */
 export class TelegramApiError extends Error {
@@ -73,6 +76,8 @@ export interface TelegramApiOptions {
   readonly token: string
   readonly baseUrl: string
   readonly timeoutMs: number
+  /** Deadline for one file download; defaults to a minute. */
+  readonly downloadTimeoutMs?: number
   readonly fetchImpl?: typeof fetch
   readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
 }
@@ -123,10 +128,12 @@ export interface DraftOptions {
 export class TelegramApi {
   private readonly fetchImpl: typeof fetch
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>
+  private readonly downloadTimeoutMs: number
 
   constructor(private readonly options: TelegramApiOptions) {
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch
     this.sleep = options.sleep ?? defaultSleep
+    this.downloadTimeoutMs = options.downloadTimeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS
   }
 
   /** Verify the token and read the bot's own identity. */
@@ -331,19 +338,32 @@ export class TelegramApi {
   async downloadFile(filePath: string, signal?: AbortSignal): Promise<Uint8Array> {
     const url = `${this.base()}/file/bot${this.options.token}/${filePath.replace(/^\/+/, '')}`
 
-    try {
-      const response = await this.fetchImpl(url, signal ? { signal } : {})
-      if (!response.ok) {
-        throw new TelegramApiError(
-          `telegram file download failed with http ${response.status}`,
-          response.status,
-          undefined,
-        )
+    return this.withRetries('downloadFile', signal, async () => {
+      // Its own deadline, and a generous one: without a timeout this waited on
+      // the operating system's TCP timeout, which is minutes, and a file may
+      // legitimately be 20 MB over a slow link.
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), this.downloadTimeoutMs)
+      const onAbort = () => controller.abort()
+      signal?.addEventListener('abort', onAbort, { once: true })
+
+      try {
+        const response = await this.fetchImpl(url, { signal: controller.signal })
+        if (!response.ok) {
+          throw new TelegramApiError(
+            `telegram file download failed with http ${response.status}`,
+            response.status,
+            undefined,
+          )
+        }
+        return new Uint8Array(await response.arrayBuffer())
+      } catch (error) {
+        throw this.normalize(error, 'downloadFile')
+      } finally {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
       }
-      return new Uint8Array(await response.arrayBuffer())
-    } catch (error) {
-      throw this.normalize(error, 'downloadFile')
-    }
+    })
   }
 
   /** Base url without a trailing slash. */
@@ -356,21 +376,37 @@ export class TelegramApi {
    *
    * @throws {TelegramApiError} with the token redacted from every field.
    */
-  private async call<T>(
+  private call<T>(
     method: string,
     body: Record<string, unknown>,
     options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  ): Promise<T> {
+    return this.withRetries(method, options.signal, () => this.request<T>(method, body, options))
+  }
+
+  /**
+   * Run one operation, backing off and repeating what is safe to repeat.
+   *
+   * Shared with the download path rather than living inside `call`: a download
+   * is the most retry-worthy request this client makes — a pure read of bytes
+   * — and leaving it outside the retry loop is what turned an intermittent
+   * connection into a screenshot the agent never saw.
+   */
+  private async withRetries<T>(
+    method: string,
+    signal: AbortSignal | undefined,
+    run: () => Promise<T>,
   ): Promise<T> {
     let lastError: unknown
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
       try {
-        return await this.request<T>(method, body, options)
+        return await run()
       } catch (error) {
         lastError = error
         const delay = retryDelay(error, attempt, IDEMPOTENT.has(method))
         if (delay === undefined) throw error
-        await this.sleep(delay, options.signal)
+        await this.sleep(delay, signal)
       }
     }
 

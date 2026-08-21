@@ -280,7 +280,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 456 tests
+pnpm test          # 462 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

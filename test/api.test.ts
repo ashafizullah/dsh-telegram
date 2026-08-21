@@ -260,3 +260,82 @@ describe('TelegramApi — transport failures', () => {
     expect(String(error)).toContain('<redacted>')
   })
 })
+
+describe('TelegramApi — downloading a file', () => {
+  /** A download that fails a given number of times, then returns bytes. */
+  function flakyDownload(failures: number) {
+    let attempts = 0
+    const fetchImpl = (async () => {
+      attempts += 1
+      if (attempts <= failures) {
+        throw Object.assign(new Error('fetch failed'), {
+          cause: Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' }),
+        })
+      }
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      } as unknown as Response
+    }) as unknown as typeof fetch
+
+    const api = new TelegramApi({
+      token: TOKEN,
+      baseUrl: 'https://api.telegram.org',
+      timeoutMs: 1000,
+      fetchImpl,
+      sleep: async () => undefined,
+    })
+    return { api, attempts: () => attempts }
+  }
+
+  it('retries a timed-out download, which is a pure read', async () => {
+    const { api, attempts } = flakyDownload(1)
+    await expect(api.downloadFile('photos/a.jpg')).resolves.toEqual(new Uint8Array([1, 2, 3]))
+    expect(attempts()).toBe(2)
+  })
+
+  it('names the timeout rather than only saying fetch failed', async () => {
+    const { api } = flakyDownload(99)
+    const error = await api.downloadFile('photos/a.jpg').catch((e: unknown) => e)
+    expect(String(error)).toContain('ETIMEDOUT')
+  })
+
+  it('carries its own deadline, rather than waiting on the operating system', async () => {
+    let signalled: AbortSignal | undefined
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      signalled = init.signal as AbortSignal
+      return { ok: true, status: 200, arrayBuffer: async () => new Uint8Array().buffer } as unknown as Response
+    }) as unknown as typeof fetch
+
+    const api = new TelegramApi({
+      token: TOKEN,
+      baseUrl: 'https://api.telegram.org',
+      timeoutMs: 1000,
+      fetchImpl,
+      sleep: async () => undefined,
+    })
+
+    await api.downloadFile('a.jpg')
+    expect(signalled).toBeInstanceOf(AbortSignal)
+  })
+
+  it('gives up on a refused download rather than repeating a definite answer', async () => {
+    let attempts = 0
+    const fetchImpl = (async () => {
+      attempts += 1
+      return { ok: false, status: 404 } as unknown as Response
+    }) as unknown as typeof fetch
+
+    const api = new TelegramApi({
+      token: TOKEN,
+      baseUrl: 'https://api.telegram.org',
+      timeoutMs: 1000,
+      fetchImpl,
+      sleep: async () => undefined,
+    })
+
+    await expect(api.downloadFile('gone.jpg')).rejects.toThrow(/404/)
+    expect(attempts).toBe(1)
+  })
+})
