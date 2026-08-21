@@ -113,6 +113,7 @@ The claim code changes on every restart and is never sent over Telegram.
 | `/cd [path]` | Show or change the working directory |
 | `/model [what]` | Show the model, `/model list`, or switch to one |
 | `/effort [level]` | Show or change how hard the model thinks |
+| `/vision [what]` | Show, change, or turn off the model that reads images |
 | `/permission [name]` | Show or change what the agent may do here |
 | `/diag` | What the plugin can see about itself, and recent failures |
 | `/screenshot` | Send a picture of the harness machine's screen |
@@ -286,6 +287,12 @@ work, and your caption still reaches the agent.
 
 **Settings → Telegram → Attachments** offers a dropdown of the models already
 configured in Settings → Models. Pick one and images become readable.
+
+`/vision` chooses which model reads images here, or turns the reading off
+entirely with `/vision off`. Off is a real answer rather than the absence of
+one: a conversation whose own model can see wants no reader at all, and saying
+so outranks whatever the deployment configured. Like the rest, it is per
+conversation and survives `/new`.
 
 **If the conversation's own model reads images, none of this happens.** The
 picture goes straight through, and the model looks at it. Since DeepSeek

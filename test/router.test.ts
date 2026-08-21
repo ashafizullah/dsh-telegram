@@ -35,6 +35,8 @@ async function build(
     efforts?: string[]
     /** Set false to run without the permission seam. */
     permission?: boolean
+    /** Set false to run without the vision seam. */
+    vision?: boolean
     /** Set false to run below Bot API 10.1, where a table is just pipes. */
     richMessages?: boolean
     /** Set false to run without diagnostics. */
@@ -135,6 +137,21 @@ async function build(
     clear: async () => void (preset = undefined),
   }
 
+  /** Which model reads images here: a route, 'off', or nothing chosen. */
+  let reader: string | undefined
+  const visionSeam = {
+    describe: () =>
+      reader === 'off' ? 'nothing — the conversation itself' : (reader ?? 'nothing configured'),
+    choose: async (_target: { chatId: string }, input: string) => {
+      if (input === 'ambiguous') return { kind: 'ambiguous' as const, candidates: ['a/m', 'b/m'] }
+      if (!input.includes('/')) return { kind: 'unknown' as const }
+      reader = input
+      return { kind: 'route' as const, route: input }
+    },
+    disable: async () => void (reader = 'off'),
+    clear: async () => void (reader = undefined),
+  }
+
   const router = new UpdateRouter({
     chat: {
       sendMessage: async ({ html }) => void said.push(html),
@@ -175,6 +192,7 @@ async function build(
         }),
     ...(options.effort === false ? {} : { effort: effortSeam }),
     ...(options.permission === false ? {} : { permission: permissionSeam }),
+    ...(options.vision === false ? {} : { vision: visionSeam }),
     textCapture,
     runner,
     botUsername: 'my_bot',
@@ -206,6 +224,8 @@ async function build(
     effort: () => effort,
     /** What it is allowed to do. */
     preset: () => preset,
+    /** What reads images here. */
+    reader: () => reader,
   }
 }
 
@@ -820,6 +840,74 @@ describe('UpdateRouter — /effort', () => {
     const { router, said } = await build({ effort: false })
     await router.handle(message('/effort high'))
     expect(said[0]).toContain('does not allow')
+  })
+})
+
+describe('UpdateRouter — /vision', () => {
+  it('shows what reads images here', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/vision'))
+    expect(said[0]).toContain('nothing configured')
+  })
+
+  it('changes the reader', async () => {
+    const { router, reader } = await build()
+    await router.handle(message('/vision xiaomi/mimo-v2.5'))
+    expect(reader()).toBe('xiaomi/mimo-v2.5')
+  })
+
+  it('turns it off, which is a real answer and not an absence', async () => {
+    // A conversation whose own model can see wants no reader at all, and
+    // saying so has to outrank whatever the deployment configured.
+    const { router, said, reader } = await build()
+    await router.handle(message('/vision off'))
+
+    expect(reader()).toBe('off')
+    expect(said[0]).toContain('the conversation itself')
+  })
+
+  it('takes the other words people use for off', async () => {
+    for (const word of ['none', 'no', 'disable', 'disabled', 'OFF']) {
+      const { router, reader } = await build()
+      await router.handle(message(`/vision ${word}`))
+      expect(reader()).toBe('off')
+    }
+  })
+
+  it('returns to whatever the deployment configured', async () => {
+    const { router, reader } = await build()
+    await router.handle(message('/vision off'))
+    await router.handle(message('/vision default'))
+    expect(reader()).toBeUndefined()
+  })
+
+  it('asks which one when several providers offer the name', async () => {
+    const { router, said, reader } = await build()
+    await router.handle(message('/vision ambiguous'))
+
+    expect(reader()).toBeUndefined()
+    expect(said[0]).toContain('a/m')
+  })
+
+  it('points at the list for a model nobody offers', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/vision imaginary'))
+    expect(said[0]).toContain('/model list')
+  })
+
+  it('says so where the deployment offers no catalog', async () => {
+    const { router, said } = await build({ vision: false })
+    await router.handle(message('/vision off'))
+    expect(said[0]).toContain('does not allow')
+  })
+
+  it('appears in /status, since it decides what happens to a screenshot', async () => {
+    const { router, said } = await build()
+    await router.handle(message('/vision xiaomi/mimo-v2.5'))
+    await router.handle(message('/status'))
+
+    expect(said[said.length - 1]).toContain('Reads images')
+    expect(said[said.length - 1]).toContain('xiaomi/mimo-v2.5')
   })
 })
 

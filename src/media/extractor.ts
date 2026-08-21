@@ -63,7 +63,13 @@ export interface AttachmentReader {
 export interface VisionExtractorOptions {
   readonly host: ExtractionHost
   readonly cwd: string
-  /** The model to read with; undefined leaves only the fallback. */
+  /**
+   * Whether any vision model is configured anywhere.
+   *
+   * Only decides {@link VisionExtractor.available}; which model a particular
+   * conversation reads with is passed to `resolve`, because `/vision` makes
+   * that a per-conversation answer.
+   */
   readonly visionModel: () => ModelRoute | undefined
   /**
    * OCR, for when no vision model is configured or the one configured could
@@ -113,14 +119,16 @@ export class VisionExtractor {
    * @returns the same prompt with each image replaced by its reading, or the
    *   original content when there is nothing to read or no model to read it.
    */
-  async resolve(content: readonly PromptPart[]): Promise<PromptPart[]> {
+  async resolve(
+    content: readonly PromptPart[],
+    route: ModelRoute | undefined = this.options.visionModel(),
+  ): Promise<PromptPart[]> {
     const images = content.filter((part) => part.type === 'image')
     if (images.length === 0) return [...content]
 
     // A route is no longer required: without one there is still OCR, and
     // without either the prompt says so rather than carrying an image that
     // nothing downstream can use.
-    const route = this.options.visionModel()
     if (route === undefined && this.options.fallback === undefined) return [...content]
 
     const said = content

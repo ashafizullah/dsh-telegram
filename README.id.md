@@ -120,6 +120,7 @@ pesan dari orang tak dikenal yang sampai ke agent — command sekalipun.
 | `/cd [path]` | Lihat atau ganti working directory |
 | `/model [apa]` | Lihat model, `/model list`, atau ganti ke salah satu |
 | `/effort [level]` | Lihat atau ganti seberapa dalam model berpikir |
+| `/vision [apa]` | Lihat, ganti, atau matikan model yang membaca gambar |
 | `/permission [nama]` | Lihat atau ganti apa yang boleh dilakukan agent di sini |
 | `/diag` | Apa yang plugin ini tahu tentang dirinya, plus kegagalan terakhir |
 | `/screenshot` | Kirim tangkapan layar mesin tempat harness jalan |
@@ -301,6 +302,13 @@ caption-mu tetap sampai ke agent.
 Buka **Settings → Telegram → Attachments**, di situ ada dropdown berisi model
 yang sudah kamu tambahkan di Settings → Models. Pilih satu, dan gambar langsung
 bisa dibaca.
+
+`/vision` memilih model mana yang membaca gambar di sini, atau mematikan
+pembacaannya sama sekali dengan `/vision off`. "Off" itu jawaban sungguhan,
+bukan sekadar ketiadaan jawaban: percakapan yang modelnya sudah bisa melihat
+tidak butuh pembaca apa pun, dan menyatakannya harus menang atas apa pun yang
+diatur di level deployment. Seperti yang lain, ini per percakapan dan selamat
+dari `/new`.
 
 **Kalau model percakapanmu sendiri sudah bisa membaca gambar, semua ini tidak
 terjadi.** Gambarnya langsung lewat, dan modelnya yang melihat. Sejak DeepSeek

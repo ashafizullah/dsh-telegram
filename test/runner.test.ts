@@ -453,6 +453,53 @@ describe('SessionRunner — the status rows', () => {
   })
 })
 
+describe('SessionRunner — the reader a conversation chose', () => {
+  it('reads with the route that conversation picked, not a global one', async () => {
+    // /vision is per conversation, so two chats can read with different models.
+    const seen: (undefined | { provider: string; model: string })[] = []
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      visionRoute: (target) => (target.chatId === '1' ? VISION : undefined),
+      extractor: {
+        available: true,
+        async resolve(content, route) {
+          seen.push(route)
+          return [...content.filter((part) => part.type === 'text')]
+        },
+      },
+    })
+
+    await runner.prompt(CHAT, withImage('one'))
+    expect(seen).toEqual([VISION])
+  })
+
+  it('passes nothing when that conversation turned the reader off', async () => {
+    const seen: unknown[] = []
+    const fake = fakeHost()
+    const runner = new SessionRunner({
+      host: fake.host,
+      bindings,
+      cwdFor: () => '/work',
+      newSessionId: () => 's1',
+      visionRoute: () => undefined,
+      extractor: {
+        available: true,
+        async resolve(content, route) {
+          seen.push(route)
+          return [...content]
+        },
+      },
+    })
+
+    await runner.prompt(CHAT, withImage('one'))
+    expect(seen).toEqual([undefined])
+  })
+})
+
 describe('SessionRunner — when the conversation\'s own model can see', () => {
   it('sends the picture, not a description of it', async () => {
     // Extraction is not merely unnecessary here — it is worse. A transcription

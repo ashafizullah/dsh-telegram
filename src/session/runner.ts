@@ -85,7 +85,7 @@ export interface AgentHost {
 export interface PromptResolver {
   /** Whether reading is possible at all right now. */
   readonly available: boolean
-  resolve(content: readonly PromptPart[]): Promise<PromptPart[]>
+  resolve(content: readonly PromptPart[], route: ModelRoute | undefined): Promise<PromptPart[]>
 }
 
 /** Construction options. */
@@ -145,13 +145,13 @@ export interface SessionRunnerOptions {
    */
   readonly modelSees?: (target: ChatTarget) => Promise<boolean>
   /**
-   * The model a conversation must move to when an image did reach it.
+   * The model this conversation reads images with.
    *
-   * Only the fallback: reached when there is no extractor, or when reading the
-   * image failed and the picture itself had to go through. Read late so a
-   * change in Settings applies to the next such turn.
+   * Per conversation because `/vision` is, and read late so a change lands on
+   * the next such turn. It is also what a conversation moves onto when the
+   * picture could not be read and had to go through as it was.
    */
-  readonly visionRoute?: () => ModelRoute | undefined
+  readonly visionRoute?: (target: ChatTarget) => ModelRoute | undefined
   /**
    * The model this conversation chose, if it chose one.
    *
@@ -191,7 +191,7 @@ export class SessionRunner implements AgentRunner {
     // Resolved before the conversation's agent is touched at all, and outside
     // the serialisation: reading an image takes a model call, and holding the
     // conversation's queue for it would stall every later message behind it.
-    const resolved = sees ? [...content] : await this.resolve(content)
+    const resolved = sees ? [...content] : await this.resolve(target, content)
     if (resolved.length === 0) return
 
     await this.serialize(target, async () => {
@@ -227,12 +227,15 @@ export class SessionRunner implements AgentRunner {
    * A failure here is not the turn's failure: the picture simply goes through
    * as it is, and the conversation moves to a model that can see it.
    */
-  private async resolve(content: readonly PromptPart[]): Promise<PromptPart[]> {
+  private async resolve(
+    target: ChatTarget,
+    content: readonly PromptPart[],
+  ): Promise<PromptPart[]> {
     const extractor = this.options.extractor
     if (!extractor?.available || !carriesImage(content)) return [...content]
 
     try {
-      return await extractor.resolve(content)
+      return await extractor.resolve(content, this.options.visionRoute?.(target))
     } catch (error) {
       this.logger.warn('[dsh-telegram] could not read an image; sending it as it is', error)
       return [...content]
@@ -254,7 +257,7 @@ export class SessionRunner implements AgentRunner {
     // An image outranks the conversation's own choice: a model that cannot see
     // fails the whole request, so this is not a preference to honour.
     if (carriesImage(content) || carried) {
-      return this.options.visionRoute?.() ?? this.options.chosenRoute?.(target)
+      return this.options.visionRoute?.(target) ?? this.options.chosenRoute?.(target)
     }
 
     return this.options.chosenRoute?.(target)

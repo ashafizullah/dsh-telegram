@@ -357,6 +357,24 @@ async function start(
 
   // The deployment's default is chosen for the surface the operator sits in
   // front of. Telegram is not that surface, so it may choose its own.
+  /**
+   * The image reader a conversation chose.
+   *
+   * `off` is stored as a value rather than as an absence, because a
+   * conversation that wants no reader has to outrank the deployment's own
+   * setting — and "nothing stored" already means "follow the deployment".
+   */
+  const chosenVision = await ChatPreferences.open(join(home, 'vision.json'), {
+    accept: (value) => value === VISION_OFF || parseRoute(value) !== undefined,
+  })
+
+  /** The model this conversation reads images with, if any. */
+  const visionRouteFor = (target: ChatTarget): ModelRoute | undefined => {
+    const chosen = chosenVision.forChat(target)
+    if (chosen === VISION_OFF) return undefined
+    return parseRoute(chosen ?? config.media.visionModel)
+  }
+
   const chosenPermissions = await ChatPreferences.open(join(home, 'permissions.json'), {
     accept: (value) => value.trim() !== '',
   })
@@ -430,9 +448,7 @@ async function start(
     permission,
     history,
     extractor,
-    // The fallback for a picture that could not be read: the conversation
-    // itself moves, and stays moved.
-    visionRoute: () => parseRoute(config.media.visionModel),
+    visionRoute: visionRouteFor,
     logger,
   })
 
@@ -503,6 +519,29 @@ async function start(
     approvals,
     recovery,
     modelSees,
+    ...(catalog
+      ? {
+          vision: {
+            describe: (target) => {
+              if (chosenVision.forChat(target) === VISION_OFF) return 'nothing — the conversation itself'
+              return formatRoute(visionRouteFor(target)) === 'the deployment default'
+                ? 'nothing configured'
+                : formatRoute(visionRouteFor(target))
+            },
+            async choose(target, input) {
+              const providers = await listCatalog(catalog as unknown as ProviderCatalog).catch(() => [])
+              const matched = matchRoute(input, providers)
+              if (matched.kind !== 'route') return matched
+
+              const route = `${matched.route.provider}/${matched.route.model}`
+              await chosenVision.set(target, route)
+              return { kind: 'route', route }
+            },
+            disable: (target) => chosenVision.set(target, VISION_OFF),
+            clear: (target) => chosenVision.clear(target),
+          },
+        }
+      : {}),
     sessions: sessionPicker,
     typing,
     diagnostics: {
@@ -1001,6 +1040,9 @@ async function describeVersion(
   if (report.latest === undefined) return installed
   return report.behind ? `${installed} → ${report.latest} available` : `${installed} (latest)`
 }
+
+/** Stored where a conversation wants no image reader at all. */
+const VISION_OFF = 'off'
 
 /** Seconds as something readable at a glance. */
 function formatUptime(seconds: number): string {

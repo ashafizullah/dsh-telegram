@@ -29,6 +29,7 @@ export const COMMANDS: Readonly<Record<string, string>> = {
   cd: 'Show or change the working directory: /cd ~/projects/app',
   model: 'Show or change the model: /model list, or /model provider/model',
   effort: 'Show or change the reasoning effort: /effort high',
+  vision: 'Show or change the model that reads images: /vision off',
   permission: 'Show or change what the agent may do: /permission read-only',
   diag: 'Show what the plugin can see about itself, and recent failures',
   screenshot: "Send a picture of the harness machine's screen",

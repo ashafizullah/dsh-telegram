@@ -112,6 +112,28 @@ export interface EffortControl {
   clear(target: ChatTarget): Promise<void>
 }
 
+/** Words that mean "no reader at all", as anyone would type them. */
+const OFF_WORDS = new Set(['off', 'none', 'no', 'disable', 'disabled'])
+
+/** The model that reads images for this conversation, and how to change it. */
+export interface VisionControl {
+  /** The reader in force, in words. */
+  describe(target: ChatTarget): string
+  /** Adopt one, or say why the words named none. */
+  choose(
+    target: ChatTarget,
+    input: string,
+  ): Promise<
+    | { kind: 'route'; route: string }
+    | { kind: 'ambiguous'; candidates: readonly string[] }
+    | { kind: 'unknown' }
+  >
+  /** Read images with nothing — the conversation's own model must cope. */
+  disable(target: ChatTarget): Promise<void>
+  /** Return the conversation to whatever the deployment configured. */
+  clear(target: ChatTarget): Promise<void>
+}
+
 /** What the agent may do here, and how to change it. */
 export interface PermissionControlSeam {
   /** The preset in force, in words. */
@@ -207,6 +229,8 @@ export interface UpdateRouterOptions {
   readonly effort?: EffortControl
   /** Absent leaves every conversation on the deployment's permission preset. */
   readonly permission?: PermissionControlSeam
+  /** Absent leaves every conversation on the deployment's image reader. */
+  readonly vision?: VisionControl
   /** Takes and sends a picture of the screen. Absent means screenshots are off. */
   readonly screen?: ScreenControl
   /** What the plugin can see about itself, for `/diag`. */
@@ -477,6 +501,9 @@ export class UpdateRouter {
       case 'effort':
         return await this.onEffort(target, args)
 
+      case 'vision':
+        return await this.onVision(target, args)
+
       case 'permission':
         return await this.onPermission(target, args)
 
@@ -639,6 +666,9 @@ export class UpdateRouter {
     const effort = this.options.effort
     if (effort) rows.push({ label: 'Effort', value: effort.describe(target) })
 
+    const vision = this.options.vision
+    if (vision) rows.push({ label: 'Reads images', value: vision.describe(target) })
+
     const permission = this.options.permission
     if (permission) rows.push({ label: 'Permission', value: permission.describe(target) })
 
@@ -722,6 +752,68 @@ export class UpdateRouter {
       target,
       `🎚 Thinking <code>${escapeHtml(chosen)}</code> from your next message.`,
     )
+  }
+
+  /**
+   * Show or change which model reads images for this conversation.
+   *
+   * `off` is a real answer rather than the absence of one: a conversation
+   * whose own model can see wants no reader at all, and saying so has to
+   * outrank whatever the deployment configured.
+   *
+   * @param target - the conversation.
+   * @param args - what followed `/vision`.
+   */
+  private async onVision(target: ChatTarget, args: string): Promise<void> {
+    const vision = this.options.vision
+    if (!vision) {
+      return await this.say(target, 'This deployment does not allow changing the image reader.')
+    }
+
+    const wanted = args.trim()
+
+    if (wanted === '') {
+      return await this.say(
+        target,
+        `👁 <code>${escapeHtml(vision.describe(target))}</code>\n\n` +
+          'See what is configured with <code>/model list</code>, change it with ' +
+          '<code>/vision provider/model</code>, or turn it off with ' +
+          '<code>/vision off</code>.',
+      )
+    }
+
+    if (OFF_WORDS.has(wanted.toLowerCase())) {
+      await vision.disable(target)
+      return await this.say(
+        target,
+        `👁 <code>${escapeHtml(vision.describe(target))}</code>\n\n` +
+          'Images now go to the conversation itself, which needs a model that reads them.',
+      )
+    }
+
+    if (wanted.toLowerCase() === 'default') {
+      await vision.clear(target)
+      return await this.say(target, `👁 Back to <code>${escapeHtml(vision.describe(target))}</code>.`)
+    }
+
+    const chosen = await vision.choose(target, wanted)
+    switch (chosen.kind) {
+      case 'route':
+        return await this.say(target, `👁 Images now read by <code>${escapeHtml(chosen.route)}</code>.`)
+      case 'ambiguous':
+        return await this.say(
+          target,
+          `Several providers offer that. Name one:\n${chosen.candidates
+            .map((candidate) => `• <code>${escapeHtml(candidate)}</code>`)
+            .join('\n')}`,
+        )
+      default:
+        return await this.say(
+          target,
+          `⚠️ No configured model called <code>${escapeHtml(wanted)}</code>. ` +
+            'Try <code>/model list</code>.',
+        )
+    }
   }
 
   /**
