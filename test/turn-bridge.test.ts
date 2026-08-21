@@ -10,8 +10,6 @@ import type { RichChat } from '../src/reply/rich-stream.js'
 function fakeChat() {
   const drafts: { draftId: number; markdown: string }[] = []
   const sent: string[] = []
-  const placeholders: string[] = []
-  const edits: { messageId: number; markdown: string }[] = []
   let nextId = 0
 
   const chat: RichChat = {
@@ -22,31 +20,27 @@ function fakeChat() {
     async sendRichMessageDraft(options) {
       drafts.push({ draftId: options.draftId, markdown: options.markdown })
     },
-    async sendMessage(options) {
-      placeholders.push(options.html)
-      return { messageId: (nextId += 1) }
-    },
-    async editRichMessage(options) {
-      edits.push({ messageId: options.messageId, markdown: options.markdown })
-      return undefined
-    },
   }
 
   return {
     chat,
     drafts,
     sent,
-    placeholders,
-    edits,
+    /** Nothing is posted before the reply now, so these stay empty. */
+    placeholders: [] as string[],
+    edits: [] as { messageId: number; markdown: string }[],
     /** The newest draft frame — what the user is watching mid-turn. */
     frame: () => drafts[drafts.length - 1]?.markdown,
-    /** The finished reply, wherever it landed. */
-    final: () => edits[edits.length - 1]?.markdown ?? sent[sent.length - 1],
+    /** The finished reply. */
+    final: () => sent[sent.length - 1],
   }
 }
 
 function build(options: { bound?: boolean; group?: boolean } = {}) {
   const chat = fakeChat()
+  /** Every hold taken, and whether it has been let go. */
+  const holds: { released: boolean }[] = []
+
   const bridge = new TurnBridge({
     chat: chat.chat,
     targetOf: (sessionId) =>
@@ -55,8 +49,22 @@ function build(options: { bound?: boolean; group?: boolean } = {}) {
     throttleMs: 0,
     placeholder: '…',
     heartbeatMs: 0,
+    typing: {
+      hold() {
+        const entry = { released: false }
+        holds.push(entry)
+        return () => void (entry.released = true)
+      },
+    },
   })
-  return { bridge, chat }
+
+  return {
+    bridge,
+    chat,
+    holds,
+    /** Whether the chat is showing "typing…" right now. */
+    typing: () => holds.some((entry) => !entry.released),
+  }
 }
 
 const start: SessionEvent = { type: 'turn/start', data: { turn: 1 } }
@@ -68,10 +76,33 @@ const delta = (text: string, turn = 1): SessionEvent => ({
 })
 
 describe('TurnBridge — streaming a turn', () => {
-  it('shows a placeholder draft as soon as the turn opens', async () => {
-    const { bridge, chat } = build()
+  it('sends nothing when the turn opens, since there is nothing to say yet', async () => {
+    // An ellipsis posted here tells the user only that their message arrived,
+    // which they already know. Telegram's own indicator covers this stretch.
+    const { bridge, chat, typing } = build()
     await bridge.handle('S', start)
-    expect(chat.frame()).toBe('…')
+
+    expect(chat.drafts).toHaveLength(0)
+    expect(chat.placeholders).toHaveLength(0)
+    expect(typing()).toBe(true)
+  })
+
+  it('stops the indicator once the first frame is showing', async () => {
+    const { bridge, typing } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', delta('Hello'))
+
+    expect(typing()).toBe(false)
+  })
+
+  it('stops the indicator when a turn ends having shown nothing', async () => {
+    // Otherwise a turn that answers with silence leaves the chat typing until
+    // the backstop expires.
+    const { bridge, typing } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', end)
+
+    expect(typing()).toBe(false)
   })
 
   it('streams markdown verbatim, for Telegram to render', async () => {
@@ -96,8 +127,10 @@ describe('TurnBridge — streaming a turn', () => {
   it('gives a later turn its own draft id, so it does not animate out of the last', async () => {
     const { bridge, chat } = build()
     await bridge.handle('S', start)
+    await bridge.handle('S', delta('first'))
     await bridge.handle('S', end)
     await bridge.handle('S', { type: 'turn/start', data: { turn: 2 } })
+    await bridge.handle('S', delta('second', 2))
 
     const ids = new Set(chat.drafts.map((d) => d.draftId))
     expect(ids.size).toBe(2)
@@ -227,12 +260,15 @@ describe('TurnBridge — lifecycle', () => {
 
 
 describe('TurnBridge — groups, which have no draft api', () => {
-  it('posts a placeholder instead of a draft', async () => {
-    const { bridge, chat } = build({ group: true })
+  it('posts nothing while it works, so the room gets no orphan ellipsis', async () => {
+    // The placeholder used to be a real message here, and a turn that produced
+    // no text left it in the room forever.
+    const { bridge, chat, typing } = build({ group: true })
     await bridge.handle('S', start)
 
     expect(chat.drafts).toHaveLength(0)
-    expect(chat.placeholders).toEqual(['…'])
+    expect(chat.placeholders).toHaveLength(0)
+    expect(typing()).toBe(true)
   })
 
   it('does not stream, because there is nothing to stream into', async () => {
@@ -244,14 +280,15 @@ describe('TurnBridge — groups, which have no draft api', () => {
     expect(chat.edits).toHaveLength(0)
   })
 
-  it('replaces the placeholder with the finished reply', async () => {
-    const { bridge, chat } = build({ group: true })
+  it('sends the finished reply as its first and only message', async () => {
+    const { bridge, chat, typing } = build({ group: true })
     await bridge.handle('S', start)
     await bridge.handle('S', delta('the answer'))
     await bridge.handle('S', end)
 
-    expect(chat.edits).toHaveLength(1)
-    expect(chat.edits[0]?.markdown).toBe('the answer')
+    expect(chat.sent).toEqual(['the answer'])
+    expect(chat.edits).toHaveLength(0)
+    expect(typing()).toBe(false)
   })
 })
 
@@ -387,7 +424,7 @@ describe('TurnBridge — showing what the agent is doing', () => {
       data: { turn: 9, name: 'bash', arguments: '{}' },
     })
 
-    expect(chat.frame()).not.toContain('tg-thinking')
+    expect(chat.drafts).toHaveLength(0)
   })
 
   it('shows nothing in a group, which has no draft to show it in', async () => {

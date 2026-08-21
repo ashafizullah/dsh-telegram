@@ -208,7 +208,7 @@ Every field has a working default; an empty config runs.
 | `cwd` | harness cwd | Working directory new conversations start in |
 | `streaming.enabled` | `true` | Show the answer as it is written |
 | `streaming.throttleMs` | `1200` | Minimum gap between streamed frames |
-| `streaming.placeholder` | `…` | Shown before any text arrives |
+| `streaming.placeholder` | `…` | Body shown under a tool-activity line before any text arrives |
 | `longPollSeconds` | `25` | How long Telegram holds an empty poll open |
 | `media.enabled` | `true` | Read images and text files the user sends |
 | `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
@@ -264,10 +264,26 @@ Telegram offers two mechanisms, and they are not interchangeable:
   last frame, so a heartbeat re-sends the current text during a long tool call;
   otherwise the preview would vanish and the bot would look dead. A draft is
   never persisted, so the turn ends with a real `sendRichMessage`.
-- **Groups have no draft API.** There a placeholder is posted immediately and
-  replaced with the finished reply, so the room still sees the bot working.
+- **Groups have no draft API.** There the finished reply is simply sent when it
+  is ready.
 
 Both end with one permanent rich message.
+
+### Nothing is posted until there is something to say
+
+Telegram's own typing indicator carries the wait, and the reply appears only
+once it has content — the first words, or the name of a tool the agent reached
+for. An ellipsis posted the moment a turn opens tells the user what they
+already know, and in a group it is a permanent message telling them.
+
+The indicator is held rather than sent. `sendChatAction` lapses after five
+seconds, which is shorter than almost everything worth waiting for here —
+downloading a file, reading an image on a vision model, a turn queued behind
+the last one, a minute inside a tool call — so one call reads as a bot that
+started and died. Holds are counted per conversation and re-sent inside their
+own expiry, so the router's hold while it reads an attachment and the bridge's
+hold over the turn that follows overlap cleanly, and typing stops when the last
+of them lets go. A ten-minute backstop covers a release that never arrives.
 
 While the agent works, the running tool is shown above the reply in a
 `<tg-thinking>` block:
@@ -291,7 +307,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 477 tests
+pnpm test          # 522 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

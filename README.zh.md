@@ -185,7 +185,7 @@ OpenAI-compatible 路由，其模型条目声明了 `input: [text, image]`。
 | `cwd` | harness 的 cwd | 新对话的工作目录 |
 | `streaming.enabled` | `true` | 边生成边显示回答 |
 | `streaming.throttleMs` | `1200` | 两帧之间的最小间隔 |
-| `streaming.placeholder` | `…` | 首个字符到达前显示的内容 |
+| `streaming.placeholder` | `…` | 在有正文之前，工具行下方显示的内容 |
 | `longPollSeconds` | `25` | Telegram 保持空轮询打开的时长 |
 | `media.enabled` | `true` | 读取用户发送的图片和文本文件 |
 | `media.maxBytes` | `20 MB` | 超过则拒绝；Telegram 的机器人下载上限即在此 |
@@ -238,10 +238,21 @@ Telegram 提供了两种机制，二者不可互换：
   间会有动画过渡。它在最后一帧之后 30 秒过期，因此在漫长的工具调用期间，会有一
   个心跳重发当前文本；否则预览会消失，机器人看上去就像死了。草稿从不持久化，所
   以一个回合以真正的 `sendRichMessage` 结束。
-- **群组没有草稿 API。** 那里会先发出一条占位消息，再用完成的回复替换它，让群里
-  仍能看到机器人正在工作。
+- **群组没有草稿 API。** 那里就在回复写完时直接发送。
 
 两者最终都归于一条持久的 rich message。
+
+### 在有话可说之前，什么都不发
+
+等待期交给 Telegram 自己的 “正在输入…” 指示，回复只在真正有内容时才出现——第一批
+文字，或者 Agent 调用的工具名。回合一开就发出去的省略号，只是在告诉用户他们已经
+知道的事；在群里，它还是一条永久留存的消息。
+
+指示是**被持有**的，而不是发一次。`sendChatAction` 五秒即失效，比这里几乎所有值得
+等待的事都短——下载文件、在视觉模型上读取图片、排在上一个回合后面、或在某个工具
+调用里待上一分钟——所以单次调用读起来就像机器人启动后立刻死了。持有按会话计数，
+并在其自身有效期内重发，因此路由器读取附件时的持有与桥接随后那个回合的持有能干净
+地重叠，只有最后一个释放时才停止输入。另有十分钟的兜底，以防某次释放永远不来。
 
 在 Agent 工作期间，正在运行的工具会以 `<tg-thinking>` 块显示在回复上方：
 
@@ -260,7 +271,7 @@ Telegram 只在草稿中接受该块，别处一概不接受，这与它的生�
 
 ```bash
 pnpm install
-pnpm test          # 477 个测试
+pnpm test          # 522 个测试
 pnpm test -- --coverage
 pnpm typecheck     # host 与 browser 两半
 pnpm build         # host 用 tsc，浏览器包用 esbuild

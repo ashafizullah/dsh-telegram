@@ -77,6 +77,11 @@ export interface TurnBridgeOptions {
    * goes quiet — which reads as a broken bot rather than as a refused request.
    */
   readonly onFailure?: (sessionId: string, failure: { message: string; code?: string }) => void
+  /**
+   * Keeps Telegram's own indicator alive from the moment a turn opens until it
+   * has something to show. Absent leaves the chat quiet until the reply lands.
+   */
+  readonly typing?: { hold(target: ChatTarget): () => void }
   readonly logger?: Logger
 }
 
@@ -84,6 +89,8 @@ export interface TurnBridgeOptions {
 interface ActiveTurn {
   readonly turn: number
   readonly stream: RichReplyStream
+  /** Stops the typing indicator standing in until the reply appears. */
+  readonly release: () => void
   /** Authoritative text from `assistant/message`, when it has arrived. */
   finalText?: string
 }
@@ -132,9 +139,10 @@ export class TurnBridge {
 
   /** Close every open stream — the plugin is unloading mid-turn. */
   async dispose(): Promise<void> {
-    const streams = [...this.active.values()]
+    const entries = [...this.active.values()]
     this.active.clear()
-    await Promise.all(streams.map((entry) => entry.stream.finish().catch(() => undefined)))
+    for (const entry of entries) entry.release()
+    await Promise.all(entries.map((entry) => entry.stream.finish().catch(() => undefined)))
   }
 
   /** Open a reply for a turn in a Telegram-bound session. */
@@ -145,10 +153,17 @@ export class TurnBridge {
     // A previous turn that never closed would otherwise leak its stream.
     await this.closeActive(sessionId)
 
+    // Taken before the stream exists, because the gap this covers starts here:
+    // a turn can think, or sit in a tool call, long before it writes anything.
+    const release = this.options.typing?.hold(target) ?? (() => undefined)
+
     const stream = new RichReplyStream({
       chat: this.options.chat,
       target,
       canDraft: this.options.canDraft(target),
+      // The indicator is a stand-in, so it stops the moment there is something
+      // real in its place.
+      onVisible: release,
       // Stable for the turn, so Telegram animates one growing preview rather
       // than replacing it. Non-zero is required.
       draftId: draftIdFor(sessionId, event.data.turn),
@@ -158,7 +173,7 @@ export class TurnBridge {
       logger: this.logger,
     })
 
-    this.active.set(sessionId, { turn: event.data.turn, stream })
+    this.active.set(sessionId, { turn: event.data.turn, stream, release })
     await stream.start()
   }
 
@@ -233,6 +248,7 @@ export class TurnBridge {
     if (!entry || entry.turn !== event.data.turn) return
 
     this.active.delete(sessionId)
+    entry.release()
 
     const reason = event.data.reason
     if (reason?.kind === 'error') {
@@ -253,6 +269,7 @@ export class TurnBridge {
     if (!entry) return
 
     this.active.delete(sessionId)
+    entry.release()
     await entry.stream.finish(entry.finalText).catch(() => undefined)
   }
 }

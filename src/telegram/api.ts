@@ -315,9 +315,13 @@ export class TelegramApi {
   }
 
   /** Show a progress indicator in the chat. Best-effort by design. */
-  async sendChatAction(chatId: string, action: ChatAction): Promise<void> {
+  async sendChatAction(chatId: string, action: ChatAction, threadId?: number): Promise<void> {
     try {
-      await this.call('sendChatAction', { chat_id: chatId, action })
+      await this.call('sendChatAction', {
+        chat_id: chatId,
+        action,
+        ...(threadId === undefined ? {} : { message_thread_id: threadId }),
+      })
     } catch {
       // Cosmetic only.
     }

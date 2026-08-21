@@ -12,13 +12,19 @@
  * - **Private chats** get `sendRichMessageDraft`: an ephemeral preview that
  *   animates between frames carrying the same draft id. It expires after 30
  *   seconds and is never persisted, so the turn must end with a real send.
- * - **Groups have no draft API at all.** There, a placeholder is posted at
- *   once and replaced with the finished reply, so the room still sees that the
- *   bot is working without a mechanism that does not exist for it.
+ * - **Groups have no draft API at all.** There the finished reply is simply
+ *   sent when it is ready.
  *
- * The expiry is the subtle part: a turn that spends two minutes in a tool call
- * emits no text, so without a heartbeat the preview would vanish and the user
- * would think the bot had died.
+ * Nothing is sent until there is something worth showing — the first text, or
+ * the name of a tool the agent reached for. An ellipsis posted the moment a
+ * turn opens says only that a message arrived, which the user already knows,
+ * and in a group it is a permanent message saying it. Telegram's own typing
+ * indicator covers that stretch far better, and {@link onVisible} is what
+ * hands it back once this has something real to show.
+ *
+ * The draft's expiry is the subtle part: a turn that spends two minutes in a
+ * tool call emits no text, so without a heartbeat the preview would vanish and
+ * the user would think the bot had died.
  */
 
 import type { ChatTarget } from '../interact/surface.js'
@@ -71,12 +77,6 @@ export interface RichChat {
     markdown: string
     threadId?: number
   }): Promise<void>
-  sendMessage(options: { chatId: string; html: string; threadId?: number }): Promise<{ messageId: number }>
-  editRichMessage(options: {
-    chatId: string
-    messageId: number
-    markdown: string
-  }): Promise<unknown>
 }
 
 /** Construction options. */
@@ -90,6 +90,13 @@ export interface RichReplyOptions {
   readonly throttleMs?: number
   readonly limit?: number
   readonly placeholder?: string
+  /**
+   * Called once, when this turn first shows something in the chat.
+   *
+   * Whoever was standing in for it until then — the typing indicator — can
+   * stop at that point.
+   */
+  readonly onVisible?: () => void
   readonly logger?: Logger
   /** Injected so a test never waits on a real timer. */
   readonly heartbeatMs?: number
@@ -116,12 +123,12 @@ export class RichReplyStream {
    * that produced it.
    */
   private activity: string | undefined
-  /** The group placeholder awaiting its finished reply. */
-  private placeholderId: number | undefined
 
   private started = false
   private finished = false
   private timer: ReturnType<typeof setTimeout> | undefined
+  /** Whether anything has appeared in the chat for this turn yet. */
+  private visible = false
   private heartbeat: ReturnType<typeof setInterval> | undefined
   private lastFrame = 0
   private queue: Promise<void> = Promise.resolve()
@@ -136,27 +143,17 @@ export class RichReplyStream {
     this.logger = options.logger ?? SILENT_LOGGER
   }
 
-  /** Show that the agent is working, by whichever mechanism this chat has. */
+  /**
+   * Open the turn.
+   *
+   * Deliberately sends nothing. Until the agent writes a word or names a tool
+   * there is nothing to show that the typing indicator is not already showing
+   * better, and a message posted here would be an ellipsis the user has to
+   * look at for the rest of the turn.
+   */
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
-
-    await this.enqueue(async () => {
-      if (this.options.canDraft) {
-        await this.draft(this.placeholder)
-        this.armHeartbeat()
-        return
-      }
-
-      // No draft API in a group: a real message stands in until the reply
-      // replaces it, so the room is not left waiting on silence.
-      const sent = await this.chat.sendMessage({
-        chatId: this.target.chatId,
-        html: this.placeholder,
-        ...(this.target.threadId !== undefined ? { threadId: this.target.threadId } : {}),
-      })
-      this.placeholderId = sent.messageId
-    })
   }
 
   /**
@@ -223,19 +220,7 @@ export class RichReplyStream {
     const chunks = splitMarkdown(markdown, this.limit)
     if (chunks.length === 0) return
 
-    const [first, ...rest] = chunks as [string, ...string[]]
-
-    if (this.placeholderId !== undefined) {
-      await this.chat.editRichMessage({
-        chatId: this.target.chatId,
-        messageId: this.placeholderId,
-        markdown: first,
-      })
-    } else {
-      await this.send(first)
-    }
-
-    for (const chunk of rest) await this.send(chunk)
+    for (const chunk of chunks) await this.send(chunk)
   }
 
   /** Post one finished chunk. */
@@ -245,6 +230,7 @@ export class RichReplyStream {
       markdown,
       ...(this.target.threadId !== undefined ? { threadId: this.target.threadId } : {}),
     })
+    this.becameVisible()
   }
 
   /** Show one draft frame, remembering it so the heartbeat can repeat it. */
@@ -263,6 +249,18 @@ export class RichReplyStream {
       ...(this.target.threadId !== undefined ? { threadId: this.target.threadId } : {}),
     })
     this.shown = frame
+
+    // Armed here rather than at start, because until the first frame there is
+    // no preview to keep alive.
+    this.armHeartbeat()
+    this.becameVisible()
+  }
+
+  /** Report, once, that this turn now shows something in the chat. */
+  private becameVisible(): void {
+    if (this.visible) return
+    this.visible = true
+    this.options.onVisible?.()
   }
 
   /** Flush now, or arm a timer for the rest of the throttle window. */

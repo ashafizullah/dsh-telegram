@@ -39,6 +39,7 @@ import { SessionRunner } from './session/runner.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
 import { createAgentHost } from './harness/host.js'
+import { TypingIndicator } from './telegram/typing.js'
 import { VisionExtractor } from './media/extractor.js'
 import { MediaCollector } from './media/collect.js'
 import { VisionCheck } from './media/vision.js'
@@ -255,9 +256,15 @@ async function start(
     logger,
   )
 
+  // One indicator for the whole plugin: the router's hold over reading an
+  // attachment and the bridge's hold over the turn it starts overlap, and both
+  // must let go before the chat stops typing.
+  const typing = new TypingIndicator({ chat: api })
+
   const turns = new TurnBridge({
     chat: api,
     targetOf,
+    typing,
     canDraft: (chat) => canStreamTo(chat.chatId, config.streaming.enabled),
     throttleMs: config.streaming.throttleMs,
     placeholder: config.streaming.placeholder,
@@ -326,6 +333,7 @@ async function start(
     questions,
     approvals,
     recovery,
+    typing,
     textCapture,
     runner,
     ...(me.username ? { botUsername: me.username } : {}),
@@ -345,6 +353,7 @@ async function start(
     () => {
       for (const dispose of teardown) dispose()
       pending.dispose()
+      typing.dispose()
       extractor.dispose()
       textCapture.dispose()
       recovery.dispose()

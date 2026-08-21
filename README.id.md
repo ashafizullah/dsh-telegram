@@ -214,7 +214,7 @@ deployment yang dikonfigurasi lewat berkas.
 | `cwd` | cwd harness | Working directory untuk percakapan baru |
 | `streaming.enabled` | `true` | Tampilkan jawaban sambil ditulis |
 | `streaming.throttleMs` | `1200` | Jeda minimum antar frame stream |
-| `streaming.placeholder` | `…` | Ditampilkan sebelum teks pertama tiba |
+| `streaming.placeholder` | `…` | Isi yang ditampilkan di bawah baris tool sebelum teks pertama tiba |
 | `longPollSeconds` | `25` | Berapa lama Telegram menahan poll kosong |
 | `media.enabled` | `true` | Baca gambar dan berkas teks yang dikirim |
 | `media.maxBytes` | `20 MB` | Tolak yang lebih besar; Telegram membatasi unduhan bot di situ |
@@ -271,10 +271,27 @@ Telegram menyediakan dua mekanisme, dan keduanya tidak saling menggantikan:
   selama tool call yang panjang; tanpa itu preview-nya lenyap dan bot terlihat
   mati. Draft tidak pernah tersimpan, jadi turn diakhiri dengan
   `sendRichMessage` sungguhan.
-- **Grup tidak punya API draft.** Di sana sebuah placeholder dikirim langsung
-  lalu diganti dengan balasan jadi, sehingga ruangan tetap melihat bot bekerja.
+- **Grup tidak punya API draft.** Di sana balasan jadi langsung dikirim begitu
+  siap.
 
 Keduanya berakhir dengan satu rich message permanen.
+
+### Tidak ada yang dikirim sebelum ada yang layak dikatakan
+
+Indikator "typing…" bawaan Telegram yang menanggung masa tunggunya, dan balasan
+baru muncul setelah ada isinya — kata pertama, atau nama tool yang dipakai
+agent. Titik tiga yang dikirim begitu turn dibuka hanya memberitahu pengguna hal
+yang sudah mereka tahu, dan di grup itu jadi pesan permanen yang mengatakannya.
+
+Indikatornya **ditahan**, bukan dikirim sekali. `sendChatAction` habis setelah
+lima detik — lebih pendek dari hampir semua hal yang layak ditunggu di sini:
+mengunduh berkas, membaca gambar di model vision, turn yang mengantre di
+belakang turn sebelumnya, atau satu menit di dalam tool call — jadi satu panggilan
+terbaca sebagai bot yang mulai lalu mati. Tahanan dihitung per percakapan dan
+dikirim ulang di dalam masa berlakunya sendiri, sehingga tahanan router saat
+membaca lampiran dan tahanan bridge atas turn sesudahnya bertumpang tindih
+dengan rapi, dan typing baru berhenti saat yang terakhir melepas. Ada batas
+sepuluh menit untuk berjaga-jaga kalau pelepasan tidak pernah datang.
 
 Selagi agent bekerja, tool yang sedang berjalan ditampilkan di atas balasan
 dalam blok `<tg-thinking>`:
@@ -295,7 +312,7 @@ tahu agent masih hidup, bukan membaca transkrip.
 
 ```bash
 pnpm install
-pnpm test          # 477 test
+pnpm test          # 522 test
 pnpm test -- --coverage
 pnpm typecheck     # paruh host dan browser
 pnpm build         # tsc untuk host, esbuild untuk bundle browser

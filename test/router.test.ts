@@ -18,7 +18,8 @@ async function build(
   options: {
     allowFrom?: number[]
     media?: unknown
-    chatAction?: (chatId: string, action: string) => void
+    /** Omit to run without an indicator at all, as a bare deployment does. */
+    typing?: boolean
   } = {},
 ) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-telegram-router-'))
@@ -39,17 +40,25 @@ async function build(
   const approvals = { handleCallback: vi.fn(() => false) }
   const textCapture = new TextCapture()
 
+  /** Every hold taken on the indicator, and whether it has been let go. */
+  const holds: { chatId: string; released: boolean }[] = []
+  const typing = {
+    hold(target: { chatId: string }) {
+      const entry = { chatId: target.chatId, released: false }
+      holds.push(entry)
+      return () => void (entry.released = true)
+    },
+  }
+
   const router = new UpdateRouter({
     chat: {
       sendMessage: async ({ html }) => void said.push(html),
       answerCallbackQuery: async (id) => void answered.push(id),
-      ...(options.chatAction
-        ? { sendChatAction: async (chatId: string, action: string) => void options.chatAction?.(chatId, action) }
-        : {}),
     },
     access,
     questions,
     approvals,
+    ...(options.typing === false ? {} : { typing }),
     textCapture,
     runner,
     botUsername: 'my_bot',
@@ -57,7 +66,19 @@ async function build(
     redact: (text) => text.split('SECRET-TOKEN').join('<redacted>'),
   })
 
-  return { router, said, answered, runner, questions, approvals, textCapture, access }
+  return {
+    router,
+    said,
+    answered,
+    runner,
+    questions,
+    approvals,
+    textCapture,
+    access,
+    holds,
+    /** Whether the chat is showing "typing…" right now. */
+    typing: () => holds.some((entry) => !entry.released),
+  }
 }
 
 /** A text message update from `from`. */
@@ -426,12 +447,12 @@ describe('UpdateRouter — telling the user what could not be used', () => {
   })
 })
 
-describe('UpdateRouter — while reading an attachment', () => {
-  it('shows an indicator, since reading can take a while', async () => {
-    const actions: string[] = []
-    const { router } = await build({
+describe('UpdateRouter — while it is working', () => {
+  it('shows an indicator while an attachment is read', async () => {
+    // Downloading a file and reading an image on a vision model both outlast
+    // Telegram's five-second action, so this is a hold rather than one call.
+    const { router, holds } = await build({
       media: { collect: async () => ({ parts: [{ type: 'text', text: 'ok' }] }) },
-      chatAction: (_chatId: string, action: string) => actions.push(action),
     })
 
     await router.handle({
@@ -444,11 +465,66 @@ describe('UpdateRouter — while reading an attachment', () => {
       },
     })
 
-    expect(actions).toEqual(['typing'])
+    expect(holds.length).toBeGreaterThan(0)
+    expect(holds[0]?.chatId).toBe('1')
+  })
+
+  it('shows one for a plain message too, which can wait behind the last', async () => {
+    const { router, holds } = await build()
+
+    await router.handle({
+      update_id: 12,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        text: 'hello',
+      },
+    })
+
+    expect(holds.length).toBeGreaterThan(0)
+  })
+
+  it('lets go once the prompt is queued, so the bridge can take over', async () => {
+    const { router, typing } = await build({
+      media: { collect: async () => ({ parts: [{ type: 'text', text: 'ok' }] }) },
+    })
+
+    await router.handle({
+      update_id: 13,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'abc' }],
+      },
+    })
+
+    expect(typing()).toBe(false)
+  })
+
+  it('lets go even when the prompt fails, so the chat does not type forever', async () => {
+    const { router, runner, typing } = await build()
+    runner.prompt = vi.fn(async () => {
+      throw new Error('the harness is gone')
+    })
+
+    await router.handle({
+      update_id: 14,
+      message: {
+        message_id: 1,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        text: 'hello',
+      },
+    })
+
+    expect(typing()).toBe(false)
   })
 
   it('reads the attachment even where the indicator is unavailable', async () => {
     const { router, runner } = await build({
+      typing: false,
       media: { collect: async () => ({ parts: [{ type: 'text', text: 'ok' }] }) },
     })
 

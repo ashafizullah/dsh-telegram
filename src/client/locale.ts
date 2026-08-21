@@ -67,7 +67,7 @@ export const locales = {
     streamingHint: 'Off sends each reply once, when it is finished.',
     throttle: 'Minimum gap between edits (ms)',
     throttleHint: 'Telegram rate-limits rapid edits to one chat. Below about a second invites that.',
-    placeholder: 'Shown while the agent is thinking',
+    placeholder: 'Shown under a tool line before any text arrives',
 
     advancedTitle: 'Advanced',
     cwd: 'Working directory for new conversations',
@@ -132,7 +132,7 @@ export const locales = {
     streamingHint: '关闭后，每条回复在写完后一次性发送。',
     throttle: '两次编辑的最小间隔（毫秒）',
     throttleHint: 'Telegram 对同一会话的频繁编辑有限流。低于约一秒容易触发。',
-    placeholder: 'Agent 思考时显示的内容',
+    placeholder: '在有正文之前，工具行下方显示的内容',
 
     advancedTitle: '高级',
     cwd: '新会话的工作目录',

@@ -43,12 +43,11 @@ export interface AgentRunner {
 export interface RouterChat {
   sendMessage(options: { chatId: string; html: string; threadId?: number }): Promise<unknown>
   answerCallbackQuery(id: string, text?: string): Promise<void>
-  /**
-   * Show that something is happening. Reading an attachment can take a while —
-   * a large file, a retried download — and Telegram gives no other sign, so
-   * without this the chat sits silent and the bot looks stuck.
-   */
-  sendChatAction?(chatId: string, action: 'typing' | 'upload_document' | 'upload_photo'): Promise<void>
+}
+
+/** Shows that a conversation is being worked on, until released. */
+export interface TypingHold {
+  hold(target: ChatTarget): () => void
 }
 
 /** Routes callback data to whichever feature owns it. */
@@ -64,6 +63,11 @@ export interface UpdateRouterOptions {
   readonly approvals: CallbackHandler
   /** Owns the button that starts a fresh conversation after a stuck turn. */
   readonly recovery?: CallbackHandler
+  /**
+   * Keeps Telegram's own indicator alive while the bot works. Absent simply
+   * leaves the chat quiet until the reply arrives.
+   */
+  readonly typing?: TypingHold
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
@@ -155,14 +159,20 @@ export class UpdateRouter {
       return await this.say(target, 'This bot is not set up to read attachments.')
     }
 
-    // Reading can take seconds, or longer if a download has to be retried.
-    void this.options.chat.sendChatAction?.(target.chatId, 'typing')
-
-    const collected = await this.options.media.collect(message, text)
-    // Said first: the user should not have to wait for a reply to learn that
-    // what they attached went nowhere.
-    if (collected.notice) await this.say(target, escapeHtml(collected.notice))
-    await this.runPrompt(target, collected.parts)
+    // Held across the whole of it. Downloading a large file, retrying one that
+    // failed, and reading an image on a vision model all outlast Telegram's
+    // five-second action several times over, and none of them show anything in
+    // the chat while they run.
+    const release = this.options.typing?.hold(target)
+    try {
+      const collected = await this.options.media.collect(message, text)
+      // Said first: the user should not have to wait for a reply to learn that
+      // what they attached went nowhere.
+      if (collected.notice) await this.say(target, escapeHtml(collected.notice))
+      await this.runPrompt(target, collected.parts)
+    } finally {
+      release?.()
+    }
   }
 
   /**
@@ -241,6 +251,10 @@ export class UpdateRouter {
 
   /** Hand a prompt to the agent, reporting a failure into the chat. */
   private async runPrompt(target: ChatTarget, content: readonly PromptPart[]): Promise<void> {
+    // A prompt is not instant even without attachments: it may wait behind the
+    // conversation's previous message, and an image in it is read before the
+    // conversation ever sees it.
+    const release = this.options.typing?.hold(target)
     try {
       await this.options.runner.prompt(target, content)
     } catch (error) {
@@ -248,6 +262,8 @@ export class UpdateRouter {
       const reason = this.options.redact?.(raw) ?? raw
       this.logger.error('[dsh-telegram] prompt failed', error)
       await this.say(target, `⚠️ ${escapeHtml(reason)}`)
+    } finally {
+      release?.()
     }
   }
 
