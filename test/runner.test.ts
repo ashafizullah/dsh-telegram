@@ -296,15 +296,16 @@ describe('SessionRunner — the model an image turn runs on', () => {
     expect(fake.agents.get('s1')?.routes).toEqual([VISION])
   })
 
-  it('leaves the next text turn on the conversation\'s own model', async () => {
-    // The point of per-turn: the expensive model is used only to look.
+  it('keeps the next text turn there too, because the log still holds the image', async () => {
+    // Per-turn is not possible: the provider inspects the whole history, so
+    // reverting would fail every following turn.
     const fake = fakeHost()
     const runner = build(fake.host, ['s1'], () => VISION)
 
     await runner.prompt(CHAT, withImage('why this error?'))
     await runner.prompt(CHAT, text('now fix it'))
 
-    expect(fake.agents.get('s1')?.routes).toEqual([VISION, undefined])
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION, VISION])
   })
 
   it('leaves an image turn alone when no vision model is configured', async () => {
@@ -321,7 +322,7 @@ describe('SessionRunner — the model an image turn runs on', () => {
     expect(fake.agents.get('s1')?.routes).toEqual([undefined])
   })
 
-  it('reads the setting per turn, so a change applies to the next image', async () => {
+  it('reads the setting per prompt, so a change applies to the next turn', async () => {
     const fake = fakeHost()
     const routes = [VISION, { provider: 'other', model: 'newer' }]
     const runner = build(fake.host, ['s1'], () => routes.shift())
@@ -330,5 +331,51 @@ describe('SessionRunner — the model an image turn runs on', () => {
     await runner.prompt(CHAT, withImage('two'))
 
     expect(fake.agents.get('s1')?.routes).toEqual([VISION, { provider: 'other', model: 'newer' }])
+  })
+})
+
+describe('SessionRunner — a session that has carried an image', () => {
+  it('keeps every later turn on the vision model, however plain its text', async () => {
+    // A provider checks the whole request history, so a session whose log
+    // holds an image fails on a text-only model forever after.
+    const fake = fakeHost()
+    const runner = build(fake.host, ['s1'], () => VISION)
+
+    await runner.prompt(CHAT, withImage('why this error?'))
+    await runner.prompt(CHAT, text('now fix it'))
+    await runner.prompt(CHAT, text('and add a test'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([VISION, VISION, VISION])
+  })
+
+  it('remembers across a restart, since the log outlives the process', async () => {
+    const first = fakeHost()
+    await build(first.host, ['s1'], () => VISION).prompt(CHAT, withImage('look'))
+
+    const second = fakeHost()
+    await build(second.host, ['s9'], () => VISION).prompt(CHAT, text('plain words'))
+
+    expect(second.agents.get('s1')?.routes).toEqual([VISION])
+  })
+
+  it('starts clean after /new, so a fresh session is cheap again', async () => {
+    const fake = fakeHost()
+    const runner = build(fake.host, ['s1', 's2'], () => VISION)
+
+    await runner.prompt(CHAT, withImage('look'))
+    await runner.reset(CHAT)
+    await runner.prompt(CHAT, text('plain words'))
+
+    expect(fake.agents.get('s2')?.routes).toEqual([undefined])
+  })
+
+  it('leaves a conversation that never carried an image alone', async () => {
+    const fake = fakeHost()
+    const runner = build(fake.host, ['s1'], () => VISION)
+
+    await runner.prompt(CHAT, text('one'))
+    await runner.prompt(CHAT, text('two'))
+
+    expect(fake.agents.get('s1')?.routes).toEqual([undefined, undefined])
   })
 })

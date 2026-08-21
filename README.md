@@ -99,9 +99,14 @@ accepts images** — `deepseek-v4-flash` and `deepseek-v4-pro` are both text-onl
 work, and your caption still reaches the agent.
 
 **Settings → Telegram → Attachments** offers a dropdown of the models already
-configured in Settings → Models. Pick one and a turn carrying an image runs
-there, while the next text turn goes back to the conversation's own model — so
-the expensive model is used only to look.
+configured in Settings → Models. Pick one and a conversation that carries an
+image runs there.
+
+It applies to the whole conversation, not just the turn with the picture in it,
+and that is not a preference — a provider checks the entire request history for
+images, so one image makes every later turn fail on a model that cannot see,
+however plain that turn's own text. The mark is durable, so a restart does not
+reroute the conversation back into failing. `/new` clears it.
 
 The catalog the browser can read carries no modality information, so the
 dropdown cannot mark which models accept images; the host checks that when an
@@ -210,7 +215,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 420 tests
+pnpm test          # 430 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

@@ -27,6 +27,15 @@ export interface Binding {
   readonly sessionId: string
   readonly createdAt: number
   readonly updatedAt: number
+  /**
+   * Whether this session's log carries an image.
+   *
+   * A provider checks the WHOLE request history for images, not just the new
+   * message, so one image makes every later turn fail on a model that cannot
+   * see. The flag is durable because that fact outlives the process: after a
+   * restart the conversation must still be routed somewhere that can read it.
+   */
+  readonly hasImages?: boolean
 }
 
 export class BindingStore {
@@ -92,6 +101,23 @@ export class BindingStore {
       createdAt: previous?.createdAt ?? now,
       updatedAt: now,
     })
+
+    this.replaceAll(next)
+    await this.persist()
+  }
+
+  /**
+   * Record that this conversation's session log now carries an image.
+   *
+   * @param target - the conversation.
+   */
+  async markImages(target: ChatTarget): Promise<void> {
+    const key = keyOf(target)
+    const binding = this.bindings.get(key)
+    if (!binding || binding.hasImages) return
+
+    const next = new Map(this.bindings)
+    next.set(key, { ...binding, hasImages: true, updatedAt: Date.now() })
 
     this.replaceAll(next)
     await this.persist()
@@ -174,5 +200,6 @@ function asBinding(value: unknown): Binding | undefined {
     sessionId: record.sessionId,
     createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now(),
     updatedAt: typeof record.updatedAt === 'number' ? record.updatedAt : Date.now(),
+    ...(record.hasImages === true ? { hasImages: true } : {}),
   }
 }

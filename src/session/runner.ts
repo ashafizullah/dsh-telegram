@@ -27,6 +27,11 @@ import { SILENT_LOGGER } from '../harness/types.js'
 
 import type { BindingStore } from './bindings.js'
 
+/** Whether a prompt carries an image, which changes a conversation for good. */
+function carriesImage(content: readonly PromptPart[]): boolean {
+  return content.some((part) => part.type === 'image')
+}
+
 /** A live agent this plugin drives. */
 export interface RunningAgent {
   readonly sessionId: string
@@ -97,18 +102,31 @@ export class SessionRunner implements AgentRunner {
     await this.serialize(target, async () => {
       const agent = await this.agentFor(target)
 
-      // Set before every prompt, not only when switching: the harness reads
-      // the selection while assembling each step, so putting the override on
-      // for an image turn and off again for the next one needs no turn-end
-      // hook — the next prompt simply clears it.
-      agent.useModel(this.routeFor(content))
+      // Set before every prompt: the harness reads the selection while
+      // assembling each step, so the override is established by the time the
+      // turn runs.
+      agent.useModel(this.routeFor(target, content))
+
+      // Recorded BEFORE the turn runs, because from this point the session's
+      // log carries an image and every later turn must be routed for it.
+      if (carriesImage(content)) await this.options.bindings.markImages(target)
+
       agent.followup(content)
     })
   }
 
-  /** The override this prompt needs: a vision model, or none. */
-  private routeFor(content: readonly PromptPart[]): ModelRoute | undefined {
-    if (!content.some((part) => part.type === 'image')) return undefined
+  /**
+   * Which model this conversation's next step must run on.
+   *
+   * Not a per-turn choice, though it looks like one. A provider checks the
+   * WHOLE request history for images, so once a session's log carries one,
+   * every later turn — however plain its own text — fails on a model that
+   * cannot see. The override therefore sticks to the conversation from the
+   * first image until it is reset with `/new`.
+   */
+  private routeFor(target: ChatTarget, content: readonly PromptPart[]): ModelRoute | undefined {
+    const carried = this.options.bindings.forChat(target)?.hasImages === true
+    if (!carriesImage(content) && !carried) return undefined
     return this.options.visionModel?.()
   }
 

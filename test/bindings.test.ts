@@ -103,3 +103,51 @@ describe('BindingStore — persistence', () => {
     expect(store.list()).toHaveLength(2)
   })
 })
+
+describe('BindingStore — remembering that a session carries an image', () => {
+  it('starts unmarked', async () => {
+    const store = await BindingStore.open(file)
+    await store.bind({ chatId: '1' }, 'session-a')
+    expect(store.forChat({ chatId: '1' })?.hasImages).toBeUndefined()
+  })
+
+  it('marks a conversation once an image has gone through', async () => {
+    const store = await BindingStore.open(file)
+    await store.bind({ chatId: '1' }, 'session-a')
+    await store.markImages({ chatId: '1' })
+
+    expect(store.forChat({ chatId: '1' })?.hasImages).toBe(true)
+  })
+
+  it('remembers across a restart, since the session log does', async () => {
+    const first = await BindingStore.open(file)
+    await first.bind({ chatId: '1' }, 'session-a')
+    await first.markImages({ chatId: '1' })
+
+    const second = await BindingStore.open(file)
+    expect(second.forChat({ chatId: '1' })?.hasImages).toBe(true)
+  })
+
+  it('clears the mark when the conversation is restarted', async () => {
+    const store = await BindingStore.open(file)
+    await store.bind({ chatId: '1' }, 'session-a')
+    await store.markImages({ chatId: '1' })
+
+    await store.bind({ chatId: '1' }, 'session-b')
+    expect(store.forChat({ chatId: '1' })?.hasImages).toBeUndefined()
+  })
+
+  it('does nothing for a conversation with no binding', async () => {
+    const store = await BindingStore.open(file)
+    await expect(store.markImages({ chatId: '404' })).resolves.toBeUndefined()
+  })
+
+  it('marks only the conversation it was told about', async () => {
+    const store = await BindingStore.open(file)
+    await store.bind({ chatId: '1' }, 'a')
+    await store.bind({ chatId: '2' }, 'b')
+    await store.markImages({ chatId: '1' })
+
+    expect(store.forChat({ chatId: '2' })?.hasImages).toBeUndefined()
+  })
+})

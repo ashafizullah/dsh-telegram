@@ -285,7 +285,12 @@ async function start(
   // check is skipped and the provider stays the authority.
   const catalog = ctx.get('llm') as ModelCatalog | undefined
   const vision = catalog
-    ? new VisionCheck(catalog, () => selectModel(ctx, logger))
+    ? new VisionCheck(catalog, () =>
+        // The model an image would ACTUALLY run on, not the conversation's
+        // default: judging the default would refuse every image the moment a
+        // vision model was configured, which is the one case it exists for.
+        parseRoute(config.media.visionModel) ?? selectModel(ctx, logger),
+      )
     : undefined
 
   const media = config.media.enabled
