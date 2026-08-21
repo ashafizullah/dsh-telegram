@@ -1,6 +1,20 @@
-# dsh-telegram
+<div align="center">
 
-**English** | [Bahasa Indonesia](README.id.md) | [中文](README.zh.md)
+<h1>dsh-telegram</h1>
+
+<p><strong>Talk to your agent from Telegram — and actually answer it when it asks something.</strong></p>
+
+<p>
+  <a href="https://www.npmjs.com/package/@ashafizullah/dsh-telegram"><img alt="npm" src="https://img.shields.io/npm/v/%40ashafizullah/dsh-telegram?logo=npm&logoColor=white&color=cb3837"></a>
+  <a href="LICENSE"><img alt="license" src="https://img.shields.io/npm/l/%40ashafizullah/dsh-telegram?color=3da639"></a>
+  <a href="package.json"><img alt="node" src="https://img.shields.io/node/v/%40ashafizullah/dsh-telegram?logo=node.js&logoColor=white&color=5fa04e"></a>
+  <a href="https://core.telegram.org/bots/api"><img alt="Bot API" src="https://img.shields.io/badge/Bot%20API-10.1%2B-2ca5e0?logo=telegram&logoColor=white"></a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness"><img alt="DeepSeek Harness" src="https://img.shields.io/badge/DeepSeek-Harness-4d6bfe"></a>
+</p>
+
+<p><strong>English</strong> · <a href="README.id.md">Bahasa Indonesia</a> · <a href="README.zh.md">中文</a></p>
+
+</div>
 
 A Telegram front end for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
