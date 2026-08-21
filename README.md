@@ -74,6 +74,22 @@ The claim code changes on every restart and is never sent over Telegram.
 
 Anything else you type is a prompt for the agent.
 
+## Configuring it
+
+Open **Settings → Telegram** in the harness web UI. The page writes straight to
+the settings document — there is no Save button, because the host applies a
+committed change by reconnecting, and a staged form would let the page and the
+running bot disagree about what is configured.
+
+The bot token is the exception. It is a secret, so it never rides the settings
+wire in either direction: the page learns only whether one is stored, writes it
+through the credentials domain, and refuses to offer an edit for a reference the
+environment already supplies (a write there would look like it worked while
+resolution kept returning the shadowing value).
+
+Everything on the page is equally settable in a profile patch, for a deployment
+that configures by file:
+
 ## Configuration
 
 Every field has a working default; an empty config runs.
@@ -123,14 +139,30 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 289 tests
+pnpm test          # 323 tests
 pnpm test -- --coverage
-pnpm typecheck
-pnpm build
+pnpm typecheck     # host and browser halves
+pnpm build         # tsc for the host, esbuild for the browser bundle
 ```
 
-Every module except the plugin entry runs without a harness, which is what
-keeps the test suite fast and the entry file thin.
+Every module runs without a harness, which is what keeps the suite fast: the
+plugin entry is exercised against a real HTTP stub of the Bot API, and the
+browser bundle is materialized exactly as the shell materializes it.
+
+### The browser half
+
+`build.client.mjs` wraps an esbuild CJS bundle in the shell's lazy-CJS factory
+envelope (`window.__ModuleLoader__.load({ id, factory })`). That envelope is
+reproduced rather than imported: the harness's `clientBundle` preset is not
+published, which its own documentation lists as a known limitation for plugins
+shipped outside its repository. It is therefore the single place this plugin is
+coupled to an internal format, and `test/client-bundle.test.ts` pins it — the
+test runs the build, materializes the factory with a stub `require`, and checks
+that `apply` claims its settings seat. A harness release that changes the format
+fails there by name instead of showing up as a blank Settings page.
+
+React and the shell's own packages are marked external; bundling a second React
+would break every hook the moment the page mounted.
 
 ## License
 
