@@ -108,6 +108,17 @@ images, so one image makes every later turn fail on a model that cannot see,
 however plain that turn's own text. The mark is durable, so a restart does not
 reroute the conversation back into failing. `/new` clears it.
 
+### When a conversation gets stuck
+
+A turn can fail in a way no retry clears — most often that one: an earlier
+message carries content the current model will not take, and nothing typed next
+will change it. The bot recognises those, says what failed, and offers a button
+that starts a fresh conversation. Asking the user to remember `/new` would be
+asking them to diagnose the plugin.
+
+Failures that may pass on their own are reported without a button, because
+retrying really is the right thing to do with them.
+
 The catalog the browser can read carries no modality information, so the
 dropdown cannot mark which models accept images; the host checks that when an
 image is actually sent, which is the one place the answer is certain. Vision
@@ -215,7 +226,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 430 tests
+pnpm test          # 451 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

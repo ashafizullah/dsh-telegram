@@ -56,6 +56,8 @@ export interface UpdateRouterOptions {
   readonly access: AccessPolicy
   readonly questions: CallbackHandler
   readonly approvals: CallbackHandler
+  /** Owns the button that starts a fresh conversation after a stuck turn. */
+  readonly recovery?: CallbackHandler
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
@@ -106,7 +108,8 @@ export class UpdateRouter {
 
     const routed =
       this.options.questions.handleCallback(query.data) ||
-      this.options.approvals.handleCallback(query.data)
+      this.options.approvals.handleCallback(query.data) ||
+      (this.options.recovery?.handleCallback(query.data) ?? false)
 
     if (!routed) {
       this.logger.debug('[dsh-telegram] ignoring a stale or unknown button press')

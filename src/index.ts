@@ -34,6 +34,7 @@ import { TurnBridge } from './reply/turn-bridge.js'
 import { canStreamTo } from './reply/rich-stream.js'
 import { UpdateRouter } from './router.js'
 import { BindingStore } from './session/bindings.js'
+import { RecoveryOffer } from './session/recovery.js'
 import { SessionRunner } from './session/runner.js'
 import { TelegramApi, TelegramApiError } from './telegram/api.js'
 import { UpdatePoller } from './telegram/poller.js'
@@ -248,12 +249,18 @@ async function start(
 
   const approvals = new TelegramApprovalAnswerer({ surface, pending, targetOf })
 
+  const recovery = new RecoveryOffer(
+    { surface, pending, targetOf, reset: (target) => runner.reset(target) },
+    logger,
+  )
+
   const turns = new TurnBridge({
     chat: api,
     targetOf,
     canDraft: (chat) => canStreamTo(chat.chatId, config.streaming.enabled),
     throttleMs: config.streaming.throttleMs,
     placeholder: config.streaming.placeholder,
+    onFailure: (sessionId, failure) => void recovery.offer(sessionId, failure),
     logger,
   })
 
@@ -311,6 +318,7 @@ async function start(
     access,
     questions,
     approvals,
+    recovery,
     textCapture,
     runner,
     ...(me.username ? { botUsername: me.username } : {}),
@@ -331,6 +339,7 @@ async function start(
       for (const dispose of teardown) dispose()
       pending.dispose()
       textCapture.dispose()
+      recovery.dispose()
       void turns.dispose()
     },
     { once: true },

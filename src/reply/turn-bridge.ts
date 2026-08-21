@@ -45,7 +45,16 @@ export type SessionEvent =
       readonly data: { readonly turn: number; readonly name: string; readonly arguments?: string }
     }
   | { readonly type: 'tool/result'; readonly data: { readonly turn: number } }
-  | { readonly type: 'turn/end'; readonly data: { readonly turn: number } }
+  | {
+      readonly type: 'turn/end'
+      readonly data: {
+        readonly turn: number
+        readonly reason?: {
+          readonly kind: string
+          readonly error?: { message: string; code?: string }
+        }
+      }
+    }
   | { readonly type: string; readonly data?: unknown }
 
 /** Construction options. */
@@ -61,6 +70,13 @@ export interface TurnBridgeOptions {
   readonly throttleMs?: number
   readonly placeholder?: string
   readonly heartbeatMs?: number
+  /**
+   * Called when a turn ends in failure.
+   *
+   * A failed turn produced no reply, so without this the conversation simply
+   * goes quiet — which reads as a broken bot rather than as a refused request.
+   */
+  readonly onFailure?: (sessionId: string, failure: { message: string; code?: string }) => void
   readonly logger?: Logger
 }
 
@@ -203,12 +219,31 @@ export class TurnBridge {
     if (text !== '') entry.finalText = text
   }
 
-  /** Deliver the finished reply. */
-  private async onTurnEnd(sessionId: string, event: { data: { turn: number } }): Promise<void> {
+  /** Deliver the finished reply, or say why there is none. */
+  private async onTurnEnd(
+    sessionId: string,
+    event: {
+      data: {
+        turn: number
+        reason?: { kind: string; error?: { message: string; code?: string } }
+      }
+    },
+  ): Promise<void> {
     const entry = this.active.get(sessionId)
     if (!entry || entry.turn !== event.data.turn) return
 
     this.active.delete(sessionId)
+
+    const reason = event.data.reason
+    if (reason?.kind === 'error') {
+      const failure = reason.error ?? { message: 'the turn failed' }
+      // Whatever streamed is kept: a turn can fail after saying something
+      // useful, and discarding it would lose the only answer there was.
+      await entry.stream.fail(new Error(failure.message))
+      this.options.onFailure?.(sessionId, failure)
+      return
+    }
+
     await entry.stream.finish(entry.finalText)
   }
 

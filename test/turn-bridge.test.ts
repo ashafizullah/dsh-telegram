@@ -398,3 +398,74 @@ describe('TurnBridge — showing what the agent is doing', () => {
     expect(chat.drafts).toHaveLength(0)
   })
 })
+
+describe('TurnBridge — a turn that failed', () => {
+  const failed = (message: string, code?: string): SessionEvent => ({
+    type: 'turn/end',
+    data: { turn: 1, reason: { kind: 'error', error: { message, ...(code ? { code } : {}) } } },
+  })
+
+  it('says what failed, rather than going quiet', async () => {
+    // A failed turn produces no reply, so silence reads as a broken bot.
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', failed('the model refused'))
+
+    expect(chat.final()).toContain('the model refused')
+  })
+
+  it('keeps whatever had already streamed', async () => {
+    const { bridge, chat } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', delta('Here is what I found'))
+    await bridge.handle('S', failed('then it broke'))
+
+    expect(chat.final()).toContain('Here is what I found')
+    expect(chat.final()).toContain('then it broke')
+  })
+
+  it('hands the failure on, so recovery can be offered', async () => {
+    const failures: { message: string; code?: string }[] = []
+    const chat = fakeChat()
+    const bridge = new TurnBridge({
+      chat: chat.chat,
+      targetOf: () => ({ chatId: '42' }),
+      canDraft: () => true,
+      throttleMs: 0,
+      heartbeatMs: 0,
+      onFailure: (_sessionId, failure) => failures.push(failure),
+    })
+
+    await bridge.handle('S', start)
+    await bridge.handle('S', failed('no image input', 'UNSUPPORTED_CONTENT'))
+
+    expect(failures).toEqual([{ message: 'no image input', code: 'UNSUPPORTED_CONTENT' }])
+  })
+
+  it('reports nothing for a turn that completed', async () => {
+    const failures: unknown[] = []
+    const chat = fakeChat()
+    const bridge = new TurnBridge({
+      chat: chat.chat,
+      targetOf: () => ({ chatId: '42' }),
+      canDraft: () => true,
+      throttleMs: 0,
+      heartbeatMs: 0,
+      onFailure: (_s, failure) => failures.push(failure),
+    })
+
+    await bridge.handle('S', start)
+    await bridge.handle('S', delta('done'))
+    await bridge.handle('S', { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+
+    expect(failures).toHaveLength(0)
+    expect(chat.sent).toEqual(['done'])
+  })
+
+  it('closes the stream, so the next turn starts clean', async () => {
+    const { bridge } = build()
+    await bridge.handle('S', start)
+    await bridge.handle('S', failed('broke'))
+    expect(bridge.isStreaming('S')).toBe(false)
+  })
+})
