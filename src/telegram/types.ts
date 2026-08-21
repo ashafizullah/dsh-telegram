@@ -60,6 +60,15 @@ export interface TelegramMessage {
   readonly caption?: string
   readonly message_thread_id?: number
   /**
+   * Shared by every message of one album.
+   *
+   * Telegram has no "several photos in one message": an album arrives as N
+   * separate updates tied together only by this id, with the caption on one of
+   * them. Treating them as N messages is why sending three screenshots used to
+   * start three conversations' worth of turns, two of them contextless.
+   */
+  readonly media_group_id?: string
+  /**
    * The message this one replies to, with enough of its sender to tell whether
    * it was ours — which is how a group conversation continues without an
    * @mention on every line.

@@ -602,6 +602,7 @@ async function start(
     () => {
       for (const dispose of teardown) dispose()
       pending.dispose()
+      router.dispose()
       void failures.flush()
       failures.dispose()
       typing.dispose()

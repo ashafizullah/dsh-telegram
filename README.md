@@ -243,6 +243,7 @@ Anything else you type is a prompt for the agent.
 | --- | --- |
 | Text | The prompt |
 | A photo, or an image sent as a file | What the vision model reads in it, and your caption |
+| Several photos at once | All of them in one message, under your caption |
 | A text file — a log, a stack trace, source | Its contents in the prompt, truncated if very long |
 | A voice note, audio, or video | A note saying it could not be read |
 
@@ -262,6 +263,18 @@ sending it as a photo would let Telegram offer a smaller copy.
 
 A file that is too large, or that fails to download, becomes a note in the
 prompt explaining why — your caption still reaches the agent either way.
+
+### Sending several at once
+
+Telegram has no "several photos in one message". An album arrives as N separate
+updates tied together only by a shared id, with the caption on exactly one of
+them — so three screenshots used to become three turns, two of them bare images
+the agent had no question for.
+
+A message belonging to an album is now held rather than answered, and the group
+goes through as one prompt once it stops growing: your caption, then every
+image. The wait is paid only by albums, and only once each, which beats
+answering the same question three times.
 
 ### A model has to be able to look
 

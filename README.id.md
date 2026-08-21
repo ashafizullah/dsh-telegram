@@ -253,6 +253,7 @@ Selain itu, apa pun yang kamu ketik jadi prompt buat agent.
 | --- | --- |
 | Teks | Prompt-nya |
 | Foto, atau gambar yang dikirim sebagai file | Isi gambar yang dibaca model vision, beserta caption-mu |
+| Beberapa foto sekaligus | Semuanya dalam satu pesan, di bawah caption-mu |
 | Berkas teks — log, stack trace, source | Isinya dalam prompt, dipotong bila sangat panjang |
 | Voice note, audio, atau video | Catatan bahwa itu tidak bisa dibaca |
 
@@ -274,6 +275,19 @@ menyediakan salinan lebih kecil.
 
 Kalau filenya kebesaran atau gagal diunduh, itu jadi catatan singkat di prompt
 yang menjelaskan kenapa — dan caption-mu tetap sampai ke agent.
+
+### Kirim beberapa sekaligus
+
+Telegram tidak punya konsep "beberapa foto dalam satu pesan". Album datang
+sebagai N update terpisah yang cuma diikat satu id bersama, dan caption-nya
+menempel di **salah satu** saja — jadi tiga screenshot dulu jadi tiga turn, dua
+di antaranya gambar telanjang yang agent tidak tahu mau diapakan.
+
+Sekarang pesan yang bagian dari album ditahan dulu, bukan dijawab, lalu
+seluruhnya masuk sebagai satu prompt begitu albumnya berhenti bertambah:
+caption-mu, lalu semua gambarnya. Jedanya cuma dibayar oleh album, dan cuma
+sekali per album — jauh lebih baik daripada menjawab pertanyaan yang sama tiga
+kali.
 
 ### Modelnya harus bisa melihat
 

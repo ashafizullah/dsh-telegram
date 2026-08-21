@@ -18,6 +18,7 @@
  */
 
 import { COMMANDS, helpText, parseCommand } from './commands.js'
+import { AlbumBuffer, captionOf } from './telegram/albums.js'
 import { addressesBot, isGroupChat, stripMention } from './telegram/addressing.js'
 import { escapeHtml } from './render/escape.js'
 import type { AccessPolicy } from './access.js'
@@ -208,6 +209,10 @@ export interface UpdateRouterOptions {
   readonly textCapture: TextCapture
   readonly runner: AgentRunner
   /**
+   * How long to wait for the rest of an album. Injected so tests need no clock.
+   */
+  readonly albumWindowMs?: number
+  /**
    * Turns a message's attachments into prompt content. Absent leaves the bot
    * text-only, which is what it was before media was wired up.
    */
@@ -236,10 +241,29 @@ export interface UpdateRouterOptions {
 }
 
 export class UpdateRouter {
+  /**
+   * Albums still arriving, if this deployment reads attachments at all.
+   *
+   * Owned here rather than injected because its whole job is to defer part of
+   * this class's own work back to it.
+   */
+  private readonly albums: AlbumBuffer | undefined
+
   private readonly logger: Logger
 
   constructor(private readonly options: UpdateRouterOptions) {
     this.logger = options.logger ?? SILENT_LOGGER
+    this.albums = options.media
+      ? new AlbumBuffer({
+          deliver: (messages) => void this.onAlbum(messages),
+          ...(options.albumWindowMs === undefined ? {} : { windowMs: options.albumWindowMs }),
+        })
+      : undefined
+  }
+
+  /** Stop waiting on albums still arriving — the plugin is unloading. */
+  dispose(): void {
+    this.albums?.dispose()
   }
 
   /**
@@ -325,6 +349,12 @@ export class UpdateRouter {
       return await this.say(target, 'This bot is not set up to read attachments.')
     }
 
+    // An album arrives as several updates sharing one id, with the caption on
+    // exactly one of them. Held rather than answered, and delivered as a whole
+    // once it stops growing — otherwise three screenshots become three turns,
+    // two of them with no question attached.
+    if (this.albums?.offer(message) === true) return
+
     // Held across the whole of it. Downloading a large file, retrying one that
     // failed, and reading an image on a vision model all outlast Telegram's
     // five-second action several times over, and none of them show anything in
@@ -336,6 +366,34 @@ export class UpdateRouter {
       // what they attached went nowhere.
       if (collected.notice) await this.say(target, escapeHtml(collected.notice))
       await this.runPrompt(target, collected.parts)
+    } finally {
+      release?.()
+    }
+  }
+
+  /**
+   * Handle a whole album as one message.
+   *
+   * Access and addressing were already decided for each part as it arrived, so
+   * what is left is the part a single photo would have taken.
+   *
+   * @param messages - the album's parts, in the order they were sent.
+   */
+  private async onAlbum(messages: TelegramMessage[]): Promise<void> {
+    const first = messages[0]
+    if (!first || !this.options.media) return
+
+    const target = targetOf(first)
+    const caption = captionOf(messages)
+    const release = this.options.typing?.hold(target)
+
+    try {
+      const collected = await this.options.media.collectAll(messages, caption)
+      if (collected.notice) await this.say(target, escapeHtml(collected.notice))
+      await this.runPrompt(target, collected.parts)
+    } catch (error) {
+      this.logger.error('[dsh-telegram] could not read an album', error)
+      await this.say(target, '⚠️ Those files could not be read.')
     } finally {
       release?.()
     }

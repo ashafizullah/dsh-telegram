@@ -181,6 +181,7 @@ async function build(
     botId: 4242,
     requireAddressing: options.requireAddressing !== false,
     ...(options.media ? { media: options.media as never } : {}),
+    albumWindowMs: 20,
     redact: (text) => text.split('SECRET-TOKEN').join('<redacted>'),
   })
 
@@ -618,6 +619,99 @@ describe('UpdateRouter — /model', () => {
     const { router, said } = await build({ models: false })
     await router.handle(message('/model list'))
     expect(said[0]).toContain('does not allow')
+  })
+})
+
+/** One part of an album, sharing a group id with its siblings. */
+function albumPart(messageId: number, caption?: string): TelegramUpdate {
+  return {
+    update_id: messageId,
+    message: {
+      message_id: messageId,
+      chat: { id: 1, type: 'private' },
+      from: { id: OWNER },
+      photo: [{ file_id: `p${messageId}` }],
+      media_group_id: 'g1',
+      ...(caption === undefined ? {} : { caption }),
+    },
+  } as TelegramUpdate
+}
+
+describe('UpdateRouter — albums', () => {
+  /** A collector that reports what it was handed. */
+  const album = () => ({
+    collect: async () => ({ parts: [{ type: 'text', text: 'single' }] }),
+    collectAll: async (messages: unknown[], caption?: string) => ({
+      parts: [
+        ...(caption === undefined ? [] : [{ type: 'text', text: caption }]),
+        ...messages.map(() => ({ type: 'image', attachment: {} })),
+      ],
+    }),
+  })
+
+  it('answers three photos once, not three times', async () => {
+    // Telegram sends an album as N updates; handling each separately turned
+    // three screenshots into three turns, two of them with no question.
+    const { router, runner } = await build({ media: album() })
+    await router.handle(albumPart(1, 'what changed?'))
+    await router.handle(albumPart(2))
+    await router.handle(albumPart(3))
+
+    await vi.waitFor(() => expect(runner.prompt).toHaveBeenCalledTimes(1))
+  })
+
+  it('puts every image in that one prompt', async () => {
+    const { router, runner } = await build({ media: album() })
+    await router.handle(albumPart(1, 'what changed?'))
+    await router.handle(albumPart(2))
+    await router.handle(albumPart(3))
+
+    await vi.waitFor(() => expect(runner.prompt).toHaveBeenCalled())
+    const parts = (runner.prompt as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as {
+      type: string
+    }[]
+    expect(parts.filter((part) => part.type === 'image')).toHaveLength(3)
+  })
+
+  it('keeps the caption, which only one part carries', async () => {
+    const { router, runner } = await build({ media: album() })
+    await router.handle(albumPart(1, 'what changed?'))
+    await router.handle(albumPart(2))
+
+    await vi.waitFor(() => expect(runner.prompt).toHaveBeenCalled())
+    const parts = (runner.prompt as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as {
+      type: string
+      text?: string
+    }[]
+    expect(parts[0]).toMatchObject({ type: 'text', text: 'what changed?' })
+  })
+
+  it('leaves a lone photo on the single-message path', async () => {
+    // Waiting on one photo would add latency for nothing.
+    const { router, runner } = await build({ media: album() })
+    await router.handle({
+      update_id: 9,
+      message: {
+        message_id: 9,
+        chat: { id: 1, type: 'private' },
+        from: { id: OWNER },
+        photo: [{ file_id: 'p9' }],
+      },
+    } as TelegramUpdate)
+
+    expect(runner.prompt).toHaveBeenCalledWith({ chatId: '1' }, [
+      { type: 'text', text: 'single' },
+    ])
+  })
+
+  it('never lets an unauthorised album through', async () => {
+    const { router, runner } = await build({ media: album() })
+    const update = albumPart(1, 'what changed?')
+    ;(update.message as { from: { id: number } }).from = { id: STRANGER }
+
+    await router.handle(update)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(runner.prompt).not.toHaveBeenCalled()
   })
 })
 

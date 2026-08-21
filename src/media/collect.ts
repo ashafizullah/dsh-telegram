@@ -191,6 +191,53 @@ export class MediaCollector {
   }
 
   /**
+   * Turn a whole album into one prompt.
+   *
+   * Each part is collected on its own — the same path a single photo takes, so
+   * refusals and size limits behave identically — and the results are then
+   * laid out as one message would have been: what the user said, then every
+   * image, then anything that could not be read.
+   *
+   * @param messages - the album's parts, in the order they were sent.
+   * @param caption - the one caption the album carries.
+   */
+  async collectAll(
+    messages: readonly TelegramMessage[],
+    caption: string | undefined,
+  ): Promise<CollectedMedia> {
+    if (messages.length === 0) return { parts: [] }
+    if (messages.length === 1) {
+      return await this.collect(messages[0] as TelegramMessage, caption)
+    }
+
+    // Sequential rather than parallel: each part downloads bytes and commits
+    // them, and a dozen at once is a burst of traffic and disk for no gain
+    // when the user is waiting on the whole set anyway.
+    const collected: CollectedMedia[] = []
+    for (const message of messages) collected.push(await this.collect(message, undefined))
+
+    const said = caption?.trim()
+    const images = collected.flatMap((item) => item.parts.filter((part) => part.type === 'image'))
+    const notes = collected.flatMap((item) =>
+      item.parts.filter((part): part is { type: 'text'; text: string } => part.type === 'text'),
+    )
+    const notices = collected.map((item) => item.notice).filter((notice) => notice !== undefined)
+
+    const parts: PromptPart[] = []
+    if (said) parts.push({ type: 'text', text: said })
+    parts.push(...images)
+    // After the images, because a note explains what is missing from them.
+    parts.push(...notes)
+
+    return {
+      parts,
+      // One line however many parts failed the same way: three identical
+      // refusals in a row say nothing the first did not.
+      ...(notices.length > 0 ? { notice: [...new Set(notices)].join('\n') } : {}),
+    }
+  }
+
+  /**
    * Store an image, stepping down through Telegram's smaller renderings.
    *
    * The seam refuses anything over its per-side limit, and the largest size of
