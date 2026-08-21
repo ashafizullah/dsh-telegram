@@ -487,10 +487,12 @@ export class UpdateRouter {
     // Sent as markdown so Telegram draws it as a real table — since Bot API
     // 10.1 it parses these itself, which is the same path an agent's own
     // tables take. A deployment without the rich send falls back to lines.
-    const rich = this.options.chat.sendRichMessage
-    if (rich) {
+    if (this.options.chat.sendRichMessage) {
       try {
-        await rich({
+        // Called as a method, not through a saved reference. Detaching it
+        // loses `this`, and the client's own `this.call(...)` then throws —
+        // which the catch below turns into a silent fall back to lines.
+        await this.options.chat.sendRichMessage({
           chatId: target.chatId,
           markdown: statusTable(rows),
           ...(target.threadId !== undefined ? { threadId: target.threadId } : {}),

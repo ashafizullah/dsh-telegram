@@ -136,10 +136,15 @@ async function build(
       ...(options.richMessages === false
         ? {}
         : {
-            sendRichMessage: async ({ markdown }: { markdown: string }) => {
+            // Reads `this` on purpose. The real client's does, and a fake that
+            // did not let a detached call — which loses `this` and throws —
+            // pass every test while /status silently fell back to lines.
+            sendRichMessage(this: { rich: string[] }, { markdown }: { markdown: string }) {
+              this.rich.push(markdown)
               said.push(markdown)
-              return { messageId: said.length }
+              return Promise.resolve({ messageId: said.length })
             },
+            rich: [] as string[],
           }),
     },
     access,
@@ -269,6 +274,16 @@ describe('UpdateRouter — commands', () => {
     const { router, said } = await build()
     await router.handle(message('/status'))
     expect(said[0]).toContain('ch-1')
+  })
+
+  it('calls the client as a method, so the send is not detached from it', async () => {
+    // The bug this pins: `const rich = chat.sendRichMessage` loses `this`, the
+    // client's own `this.call(...)` throws, and the catch turns that into a
+    // silent fall back to lines — a table that never appears.
+    const { router, said } = await build()
+    await router.handle(message('/status'))
+
+    expect(said[said.length - 1]).toContain('| --- | --- |')
   })
 
   it('draws it as a table, which Telegram renders itself since Bot API 10.1', async () => {
