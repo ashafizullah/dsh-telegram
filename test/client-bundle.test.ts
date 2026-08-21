@@ -116,7 +116,7 @@ describe('client bundle — what the factory produces', () => {
       locale: { register: vi.fn(), bind: () => (key: string) => key },
       settingsScope: { bind: () => ({ getSnapshot: () => ({}), subscribe: () => () => undefined }) },
       slots: { register: registerSlot, inject },
-      get: () => ({ api: { credentials: {} } }),
+      get: () => ({ api: { credentials: {}, llm: {} } }),
     })
 
     expect(inject).toHaveBeenCalledWith('settings.section', expect.any(Function))
@@ -134,7 +134,7 @@ describe('client bundle — what the factory produces', () => {
       locale: { register: vi.fn(), bind: () => (key: string) => key },
       settingsScope: { bind },
       slots: { register: vi.fn(), inject: (_n: string, e: () => unknown) => void e() },
-      get: () => ({ api: { credentials: {} } }),
+      get: () => ({ api: { credentials: {}, llm: {} } }),
     })
 
     expect(bind).toHaveBeenCalledWith({ namespace: 'telegram' })
@@ -148,7 +148,7 @@ describe('client bundle — what the factory produces', () => {
       locale: { register, bind: () => (key: string) => key },
       settingsScope: { bind: () => ({ getSnapshot: () => ({}), subscribe: () => () => undefined }) },
       slots: { register: vi.fn(), inject: (_n: string, e: () => unknown) => void e() },
-      get: () => ({ api: { credentials: {} } }),
+      get: () => ({ api: { credentials: {}, llm: {} } }),
     })
 
     expect(register).toHaveBeenCalledWith('telegram', expect.objectContaining({ en: expect.anything() }))
@@ -182,7 +182,7 @@ describe('client bundle — service injection', () => {
     // Context METHODS are always available; only services need declaring.
     const methods: Record<string, unknown> = {
       effect: (callback: () => void) => callback(),
-      get: () => ({ api: { credentials: {} } }),
+      get: () => ({ api: { credentials: {}, llm: {} } }),
       on: () => () => undefined,
     }
 
@@ -255,7 +255,7 @@ describe('client bundle — translations', () => {
       locale: { register, bind: () => (key: string) => key },
       settingsScope: { bind: () => ({ getSnapshot: () => ({}), subscribe: () => () => undefined }) },
       slots: { register: vi.fn(), inject: (_n: string, e: () => unknown) => void e() },
-      get: () => ({ api: { credentials: {} } }),
+      get: () => ({ api: { credentials: {}, llm: {} } }),
     })
 
     const [, dictionary] = register.mock.calls[0] as [string, Record<string, unknown>]

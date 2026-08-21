@@ -99,8 +99,33 @@ export interface CredentialInfo {
   readonly writable: boolean
 }
 
-/** The credential calls the token control needs. */
+/** One model the host has configured, as the catalog reports it. */
+export interface CatalogModel {
+  readonly id: string
+  readonly name?: string
+  readonly description?: string
+}
+
+/** Models grouped by the provider serving them. */
+export interface CatalogGroup {
+  readonly id: string
+  readonly name?: string
+  readonly models: readonly CatalogModel[]
+}
+
+/** The host calls this page makes. */
 export interface CredentialsRemote {
+  /**
+   * The configured model catalog.
+   *
+   * It carries no modality information, so this page cannot tell which models
+   * accept images; the host checks that when an image is actually sent.
+   */
+  llm: {
+    models(payload: Record<string, never>): Promise<
+      RemoteAnswer<{ groups: readonly CatalogGroup[] }>
+    >
+  }
   credentials: {
     describe(payload: {
       refs: string[]

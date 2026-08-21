@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 
 import { describe, expect, it } from 'vitest'
 
-import { FILL, TEXT, Toggle } from '../src/client/fields.js'
+import { FILL, Select, TEXT, Toggle } from '../src/client/fields.js'
 import { presentToken } from '../src/client/panel.js'
 
 /**
@@ -186,5 +186,58 @@ describe('presentToken', () => {
     ]) {
       expect(presentToken(state, false).hint).not.toBe('tokenFromEnvironment')
     }
+  })
+})
+
+describe('Select', () => {
+  const options = [
+    { value: '', label: 'None' },
+    { value: 'a/1', label: 'One', group: 'Provider A' },
+    { value: 'a/2', label: 'Two', group: 'Provider A' },
+    { value: 'b/1', label: 'Three', group: 'Provider B' },
+  ]
+
+  /** The select's children, flattened past any optgroup wrappers. */
+  function structure(element: unknown) {
+    const children = (element as { props: { children: unknown[] } }).props.children
+    return children.flat().map((child) => {
+      const node = child as { type: unknown; props: { label?: string; children?: unknown } }
+      return typeof node.type === 'string' && node.type === 'optgroup'
+        ? { group: node.props.label }
+        : { option: (node.props as { value?: string }).value }
+    })
+  }
+
+  it('renders ungrouped options before any group', () => {
+    const rendered = structure(Select({ value: '', options, onChange: () => undefined }))
+    expect(rendered[0]).toEqual({ option: '' })
+  })
+
+  it('groups the rest under their provider', () => {
+    const rendered = structure(Select({ value: '', options, onChange: () => undefined }))
+    expect(rendered).toContainEqual({ group: 'Provider A' })
+    expect(rendered).toContainEqual({ group: 'Provider B' })
+  })
+
+  it('shows the current value as selected', () => {
+    const element = Select({ value: 'a/2', options, onChange: () => undefined }) as {
+      props: { value: string }
+    }
+    expect(element.props.value).toBe('a/2')
+  })
+
+  it('paints a real surface, so its popup is readable in both themes', () => {
+    const element = Select({ value: '', options, onChange: () => undefined }) as {
+      props: { style: Record<string, unknown> }
+    }
+    expect(String(element.props.style.background)).not.toContain('label-')
+    expect(element.props.style.background).toBe(FILL.surface)
+  })
+
+  it('can be disabled', () => {
+    const element = Select({ value: '', options, onChange: () => undefined, disabled: true }) as {
+      props: { disabled: boolean }
+    }
+    expect(element.props.disabled).toBe(true)
   })
 })

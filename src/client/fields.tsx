@@ -256,6 +256,62 @@ export function Toggle(props: { checked: boolean; onChange: (next: boolean) => v
   )
 }
 
+/** One choice in a {@link Select}, optionally grouped under a heading. */
+export interface SelectOption {
+  readonly value: string
+  readonly label: string
+  /** Groups options under a shared heading; ungrouped options come first. */
+  readonly group?: string
+}
+
+/** A dropdown over a known set of choices. */
+export function Select(props: {
+  value: string
+  options: readonly SelectOption[]
+  onChange: (value: string) => void
+  disabled?: boolean
+  width?: number
+}) {
+  const groups = [...new Set(props.options.map((option) => option.group ?? ''))]
+
+  return (
+    <select
+      value={props.value}
+      disabled={props.disabled ?? false}
+      onChange={(event) => props.onChange(event.target.value)}
+      style={{
+        width: props.width ?? 240,
+        padding: '6px 8px',
+        fontSize: 13,
+        color: COLOR.text,
+        // A transparent select shows the page through its own popup on some
+        // platforms; a real surface keeps it readable in both themes.
+        background: FILL.surface,
+        border: `1px solid ${COLOR.borderStrong}`,
+        borderRadius: 6,
+        outline: 'none',
+        opacity: props.disabled ? 0.5 : 1,
+      }}
+    >
+      {groups.map((group) => {
+        const members = props.options.filter((option) => (option.group ?? '') === group)
+        const items = members.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))
+        return group === '' ? (
+          items
+        ) : (
+          <optgroup key={group} label={group}>
+            {items}
+          </optgroup>
+        )
+      })}
+    </select>
+  )
+}
+
 /** A push button for an action that is not a preference. */
 export function Button(props: {
   children: ReactNode

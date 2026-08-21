@@ -56,8 +56,11 @@ export const locales = {
     mediaHint: 'Off replies that attachments are not accepted.',
     visionModel: 'Model for turns with an image',
     visionModelHint:
-      'As provider/model, for example openai/gpt-5. Empty uses the conversation\'s own model, which must then accept images — no DeepSeek model does. The override applies only to the turn carrying the image.',
-    visionModelInvalid: 'Write it as provider/model.',
+      'Chosen from the models added in Settings → Models. It must accept images — no DeepSeek model does. The override applies only to the turn carrying the image.',
+    visionModelNone: "Use the conversation's model",
+    visionModelLoading: 'Reading the configured models…',
+    visionModelUnreadable: 'Could not read the configured models. Add one in Settings → Models.',
+    visionModelUnavailable: 'No longer configured',
 
     repliesTitle: 'Replies',
     streamingEnabled: 'Stream the answer as it is written',
@@ -118,8 +121,11 @@ export const locales = {
     mediaHint: '关闭后，收到附件时回复不接受。',
     visionModel: '含图片的回合使用的模型',
     visionModelHint:
-      '格式为 provider/model，例如 openai/gpt-5。留空则使用会话本身的模型，但该模型必须支持图片——DeepSeek 的模型都不支持。此覆盖仅作用于携带图片的那一个回合。',
-    visionModelInvalid: '请写成 provider/model 的形式。',
+      '从 设置 → Models 中已添加的模型里选择。该模型必须支持图片——DeepSeek 的模型都不支持。此覆盖仅作用于携带图片的那一个回合。',
+    visionModelNone: '使用会话本身的模型',
+    visionModelLoading: '正在读取已配置的模型…',
+    visionModelUnreadable: '无法读取已配置的模型。请先在 设置 → Models 中添加。',
+    visionModelUnavailable: '已不再配置',
 
     repliesTitle: '回复',
     streamingEnabled: '边生成边显示回答',

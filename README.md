@@ -98,11 +98,16 @@ accepts images** — `deepseek-v4-flash` and `deepseek-v4-pro` are both text-onl
 — so out of the box a screenshot is declined with a sentence naming what would
 work, and your caption still reaches the agent.
 
-Set `media.visionModel` to `provider/model` and a turn carrying an image runs
-there instead, while the next text turn goes back to the conversation's own
-model — so the expensive model is used only to look. Vision models reach the
-harness through a provider that carries them, such as an OpenAI-compatible
-route added in Settings → Models.
+**Settings → Telegram → Attachments** offers a dropdown of the models already
+configured in Settings → Models. Pick one and a turn carrying an image runs
+there, while the next text turn goes back to the conversation's own model — so
+the expensive model is used only to look.
+
+The catalog the browser can read carries no modality information, so the
+dropdown cannot mark which models accept images; the host checks that when an
+image is actually sent, which is the one place the answer is certain. Vision
+models reach the harness through a provider that carries them, such as an
+OpenAI-compatible route added in Settings → Models.
 
 A file that is too large, or that fails to download, becomes a note in the
 prompt explaining why — your caption still reaches the agent either way.
@@ -141,7 +146,7 @@ Every field has a working default; an empty config runs.
 | `media.enabled` | `true` | Read images and text files the user sends |
 | `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
 | `media.maxTextChars` | `60000` | Truncate an inlined text file to this many characters |
-| `media.visionModel` | `""` | `provider/model` for turns carrying an image; empty uses the conversation's model |
+| `media.visionModel` | `""` | `provider/model` for turns carrying an image; empty uses the conversation's model. Picked from a dropdown on the settings page |
 
 ## Living alongside the web UI
 
@@ -205,7 +210,7 @@ agent — not even a command.
 
 ```bash
 pnpm install
-pnpm test          # 415 tests
+pnpm test          # 420 tests
 pnpm test -- --coverage
 pnpm typecheck     # host and browser halves
 pnpm build         # tsc for the host, esbuild for the browser bundle

@@ -14,9 +14,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { Button, Note, NumberInput, Row, Section, TextInput, Toggle } from './fields.js'
+import { Button, Note, NumberInput, Row, Section, Select, TextInput, Toggle } from './fields.js'
+import type { SelectOption } from './fields.js'
 import type { LocaleKey } from './locale.js'
-import type { CredentialsRemote, SettingsScope, SettingsSnapshot } from './types.js'
+import type { CatalogGroup, CredentialsRemote, SettingsScope, SettingsSnapshot } from './types.js'
 
 /** The section of settings this page edits. */
 export interface TelegramSettings {
@@ -156,14 +157,13 @@ export function TelegramPanel({ scope, remote, t }: PanelProps) {
           />
         </Row>
 
-        <Row label={t('visionModel')} hint={t('visionModelHint')}>
-          <CommittedText
-            value={value.media.visionModel ?? ''}
-            width={240}
-            disabled={locked || !value.media.enabled}
-            onCommit={(next) => writeNested('media', { visionModel: next.trim() })}
-          />
-        </Row>
+        <VisionModelRow
+          value={value.media.visionModel ?? ''}
+          remote={remote}
+          t={t}
+          disabled={locked || !value.media.enabled}
+          onChange={(next) => writeNested('media', { visionModel: next })}
+        />
       </Section>
 
       <Section title={t('repliesTitle')}>
@@ -416,6 +416,86 @@ function TokenRow(props: {
         {saved ? <Note tone="good">{t('tokenSaved')}</Note> : null}
         {failure ? <Note tone="bad">{failure}</Note> : null}
       </div>
+    </Row>
+  )
+}
+
+/**
+ * Which model a turn carrying an image runs on.
+ *
+ * A dropdown over the models already configured in Settings → Models, rather
+ * than a typed `provider/model`: the set is knowable, and a typo there is only
+ * discovered when a screenshot silently goes nowhere.
+ *
+ * The catalog carries no modality information, so this cannot mark which
+ * models accept images. The host checks that when an image is actually sent
+ * and says so in the chat, which is the one place the answer is certain.
+ */
+function VisionModelRow(props: {
+  value: string
+  remote: CredentialsRemote
+  t: (key: LocaleKey, params?: Record<string, unknown>) => string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  const { remote, t } = props
+  const [groups, setGroups] = useState<readonly CatalogGroup[] | undefined>()
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let stale = false
+    void remote.llm
+      .models({})
+      .then((answer) => {
+        if (stale) return
+        if (!answer.result.ok) return setFailed(true)
+        setGroups(answer.result.value.groups)
+      })
+      .catch(() => {
+        if (!stale) setFailed(true)
+      })
+    return () => {
+      stale = true
+    }
+  }, [remote])
+
+  const options = useMemo(() => {
+    const listed: SelectOption[] = [{ value: '', label: t('visionModelNone') }]
+
+    for (const group of groups ?? []) {
+      for (const model of group.models) {
+        listed.push({
+          value: `${group.id}/${model.id}`,
+          label: model.name ?? model.id,
+          group: group.name ?? group.id,
+        })
+      }
+    }
+
+    // A model configured earlier whose provider has since gone would otherwise
+    // vanish from the dropdown and be silently replaced on the next save.
+    if (props.value !== '' && !listed.some((option) => option.value === props.value)) {
+      listed.push({ value: props.value, label: props.value, group: t('visionModelUnavailable') })
+    }
+
+    return listed
+  }, [groups, props.value, t])
+
+  const hint = failed
+    ? t('visionModelUnreadable')
+    : groups === undefined
+      ? t('visionModelLoading')
+      : t('visionModelHint')
+
+  return (
+    <Row label={t('visionModel')} hint={hint}>
+      <Select
+        value={props.value}
+        options={options}
+        disabled={props.disabled || groups === undefined}
+        onChange={props.onChange}
+        width={260}
+      />
     </Row>
   )
 }
