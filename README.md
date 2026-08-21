@@ -1,5 +1,7 @@
 # dsh-telegram
 
+**English** | [Bahasa Indonesia](README.id.md) | [中文](README.zh.md)
+
 A Telegram front end for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
 Talk to your agent from your phone — and actually *answer* it when it asks something.
@@ -25,12 +27,24 @@ entirely in Telegram would stall on the first question with no way to clear it.
 This plugin registers itself as that UI, so questions and approvals arrive as
 buttons in the chat.
 
+## Requirements
+
+- DeepSeek Harness with a profile you can add plugins to
+- **Bot API 10.1 or later**, for `sendRichMessage` and `sendRichMessageDraft`
+- Node 22 or later
+
+There is no HTML fallback. Telegram's rich markdown parser is forgiving — an
+unterminated code fence or a line of stray markers is accepted rather than
+rejected — so a mid-stream frame does not need one.
+
 ## Install
 
 ```bash
-# from a checkout
-pnpm build
-npx @deepseek-ai/dsh plugin --profile web add -w /path/to/dsh-telegram
+git clone https://github.com/ashafizullah/dsh-telegram.git
+cd dsh-telegram
+pnpm install && pnpm build
+
+npx @deepseek-ai/dsh plugin --profile web add -w "$(pwd)"
 ```
 
 Then give it a bot token. Create a bot with [@BotFather](https://t.me/BotFather)
@@ -49,6 +63,10 @@ Start the profile. The console prints a claim code:
 ```
 
 Send that to your bot and it is yours. Until then it answers nobody.
+
+The code is also written to `$DSH_HOME/dsh-telegram/claim-code.txt`, owner-only,
+because several profiles compose no console sink at all and a code nobody can
+read makes the bot permanently unusable.
 
 ## Access
 
@@ -90,6 +108,9 @@ Images go through the harness attachment seam, which accepts PNG, JPEG, WebP
 and GIF. Everything else it explicitly defers, so this plugin says so rather
 than accepting the message and quietly dropping what it carried.
 
+A file that is too large, or that fails to download, becomes a note in the
+prompt explaining why — your caption still reaches the agent either way.
+
 ### A model has to be able to look
 
 A model that declares no image input rejects the whole request, so an image is
@@ -108,6 +129,13 @@ images, so one image makes every later turn fail on a model that cannot see,
 however plain that turn's own text. The mark is durable, so a restart does not
 reroute the conversation back into failing. `/new` clears it.
 
+The catalog the browser can read carries no modality information, so the
+dropdown cannot mark which models accept images. The host checks that when an
+image is actually sent, which is the one place the answer is certain. Vision
+models reach the harness through a provider that carries them, such as an
+OpenAI-compatible route added in Settings → Models, whose model entry declares
+`input: [text, image]`.
+
 ### When a conversation gets stuck
 
 A turn can fail in a way no retry clears — most often that one: an earlier
@@ -118,15 +146,6 @@ asking them to diagnose the plugin.
 
 Failures that may pass on their own are reported without a button, because
 retrying really is the right thing to do with them.
-
-The catalog the browser can read carries no modality information, so the
-dropdown cannot mark which models accept images; the host checks that when an
-image is actually sent, which is the one place the answer is certain. Vision
-models reach the harness through a provider that carries them, such as an
-OpenAI-compatible route added in Settings → Models.
-
-A file that is too large, or that fails to download, becomes a note in the
-prompt explaining why — your caption still reaches the agent either way.
 
 ## Configuring it
 
@@ -163,6 +182,20 @@ Every field has a working default; an empty config runs.
 | `media.maxBytes` | `20 MB` | Refuse anything larger; Telegram caps bot downloads there |
 | `media.maxTextChars` | `60000` | Truncate an inlined text file to this many characters |
 | `media.visionModel` | `""` | `provider/model` for turns carrying an image; empty uses the conversation's model. Picked from a dropdown on the settings page |
+
+## Diagnostics
+
+`ctx.logger` reaches whatever sink the deployment composed, and several profiles
+compose none — so a plugin that only logs its failures is silent about them.
+This one also writes its state to `$DSH_HOME/dsh-telegram/status.json` on every
+transition:
+
+```json
+{ "state": "connected", "bot": "your_bot", "updatedAt": "..." }
+```
+
+`connecting`, `connected`, `idle` with a reason, `failed` with a reason. The bot
+token never appears in it.
 
 ## Living alongside the web UI
 
@@ -251,12 +284,14 @@ fails there by name instead of showing up as a blank Settings page.
 React and the shell's own packages are marked external; bundling a second React
 would break every hook the moment the page mounted.
 
-### Requirements
+## Known limitations
 
-Bot API **10.1 or later**, for `sendRichMessage` and `sendRichMessageDraft`.
-There is no HTML fallback: Telegram's rich markdown parser is forgiving — an
-unterminated code fence or a line of stray markers is accepted rather than
-rejected — so a mid-stream frame does not need one.
+- **Groups have no gating.** In a group the bot answers every message from an
+  allowlisted user — no mention or reply required.
+- **Reasoning effort is not carried.** Only provider and model reach a Telegram
+  session; an effort chosen in Settings → Models does not.
+- **One working directory.** Every conversation starts in the same `cwd`.
+- **No voice, audio or video.** The harness attachment seam takes images only.
 
 ## License
 
